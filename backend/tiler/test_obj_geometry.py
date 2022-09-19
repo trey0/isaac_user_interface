@@ -15,7 +15,6 @@
 # permissions and limitations under the License.
 
 import numpy as np
-
 from obj_geometry import Geometry
 from tile_system import BoundingBox
 

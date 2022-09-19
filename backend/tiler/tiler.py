@@ -24,10 +24,9 @@ import logging
 import os
 
 import numpy as np
-
 from obj_geometry import Geometry
-from tile_system import TileSystem
 from tile_generator import TileGenerator
+from tile_system import TileSystem
 
 
 def mkdir_for_file(path):
@@ -50,6 +49,7 @@ FUZE_TILE_CONFIG = {
     "target_texels_per_tile": 32,
 }
 
+
 def tiler(in_obj, out_dir):
     if os.path.exists(out_dir):
         logging.warning(f"Output directory {out_dir} already exists, not overwriting")
@@ -57,10 +57,18 @@ def tiler(in_obj, out_dir):
 
     config = FUZE_TILE_CONFIG
 
-    ts = TileSystem(np.array(config["origin"], dtype=np.float64),
-                    config["scale"], "{zoom}/{xi}/{yi}/{zi}")
-    generator = TileGenerator("out", ts, config["min_zoom"], config["max_zoom"],
-                              config["target_texels_per_tile"])
+    ts = TileSystem(
+        np.array(config["origin"], dtype=np.float64),
+        config["scale"],
+        "{zoom}/{xi}/{yi}/{zi}",
+    )
+    generator = TileGenerator(
+        "out",
+        ts,
+        config["min_zoom"],
+        config["max_zoom"],
+        config["target_texels_per_tile"],
+    )
     geom = Geometry.read_obj(in_obj)
 
     if 0:
@@ -75,7 +83,8 @@ def tiler(in_obj, out_dir):
 
 def main():
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("in_obj", help="input obj file")
     parser.add_argument("out_dir", help="output directory for 3D tiles")

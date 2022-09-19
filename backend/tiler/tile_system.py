@@ -28,8 +28,10 @@ class BoundingBox(object):
         return f"<BoundingBox {self.min_corner} {self.max_corner}>"
 
     def is_inside(self, pts):
-        return (np.logical_and(np.all(self.min_corner <= pts, axis=1),
-                               np.all(pts < self.max_corner, axis=1)))
+        return np.logical_and(
+            np.all(self.min_corner <= pts, axis=1),
+            np.all(pts < self.max_corner, axis=1),
+        )
 
 
 class TileSystem(object):

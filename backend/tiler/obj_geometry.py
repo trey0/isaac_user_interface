@@ -68,6 +68,7 @@ def get_side_lengths(tris):
 
 MAP_KD_REGEX = re.compile(r"map_Kd\s+(.*)$")
 
+
 class Mtl(object):
     def __init__(self, input_path, texture_images, lines):
         self.input_path = input_path
@@ -86,12 +87,13 @@ class Mtl(object):
                 m = MAP_KD_REGEX.search(line)
                 if m:
                     mtl_image_path = m.group(1)
-                    full_image_path = os.path.realpath(os.path.join(os.path.dirname(input_path), mtl_image_path))
+                    full_image_path = os.path.realpath(
+                        os.path.join(os.path.dirname(input_path), mtl_image_path)
+                    )
                     img = cv2.imread(full_image_path)
                     texture_images.append((mtl_image_path, img))
 
         return Mtl(input_path, texture_images, lines)
-
 
     def write_mtl(self, output_path, texture_map):
         with open(output_path, "w", encoding="utf-8") as out:
@@ -99,7 +101,9 @@ class Mtl(object):
                 m = MAP_KD_REGEX.search(line)
                 if m:
                     input_texture_image = m.group(1)
-                    output_texture_image = texture_map.get(input_texture_image, input_texture_image)
+                    output_texture_image = texture_map.get(
+                        input_texture_image, input_texture_image
+                    )
                     out.write(f"map_Kd {output_texture_image}")
                 else:
                     out.write(line)
@@ -139,24 +143,24 @@ class Geometry(object):
                 args = fields[1:]
 
                 if cmd == "v":
-                    assert(len(args) == 3)
+                    assert len(args) == 3
                     v.extend((float(a) for a in args))
 
                 elif cmd == "vt":
-                    assert(len(args) == 2)
+                    assert len(args) == 2
                     vt.extend((float(a) for a in args))
 
                 elif cmd == "vn":
-                    assert(len(args) == 3)
+                    assert len(args) == 3
                     vn.extend((float(a) for a in args))
 
                 elif cmd == "f":
-                    assert(len(args) == 3)
+                    assert len(args) == 3
                     for a in args:
                         f.extend(parse_face_vertex(a))
 
                 elif cmd == "mtllib":
-                    assert(len(args) == 1)
+                    assert len(args) == 1
                     mtl_path = args[0]
                     input_mtl_path = os.path.join(os.path.dirname(input_path), mtl_path)
                     mtl = Mtl.read_mtl(args[0])
@@ -165,7 +169,9 @@ class Geometry(object):
                     other_cmds.append(line)
 
                 else:
-                    print(f"WARNING: Geometry.load(): unknown command '{cmd}', ignoring")
+                    print(
+                        f"WARNING: Geometry.load(): unknown command '{cmd}', ignoring"
+                    )
 
         # convert to numpy
         v = np.array(v, dtype=np.float64).reshape((-1, 3))
@@ -187,7 +193,9 @@ class Geometry(object):
 
         with open(output_path, "w", encoding="utf-8") as out:
             if self.mtl:
-                mtl_from_output_path = os.path.relpath(output_mtl_path, os.path.dirname(output_path))
+                mtl_from_output_path = os.path.relpath(
+                    output_mtl_path, os.path.dirname(output_path)
+                )
                 out.write(f"mtllib {mtl_from_output_path}\n")
             for line in self.other_cmds:
                 out.write(line)
@@ -219,8 +227,7 @@ class Geometry(object):
         return Geometry(self.input_path, v, vt, vn, f, self.mtl, self.other_cmds)
 
     def get_bounding_box(self):
-        return BoundingBox(np.amin(self.v, axis=0),
-                           np.amax(self.v, axis=0))
+        return BoundingBox(np.amin(self.v, axis=0), np.amax(self.v, axis=0))
 
     def is_empty(self):
         return self.f.size == 0
@@ -236,13 +243,13 @@ class Geometry(object):
         uv_tris = self.vt[self.f[:, :, 1], :]
         uv_diffs = np.diff(uv_tris, axis=1).reshape((-1, 2))
 
-        assert(len(self.mtl.texture_images) == 1)
+        assert len(self.mtl.texture_images) == 1
         texture_path, texture_img = self.mtl.texture_images[0]
         img_size = np.array(texture_img.shape[:2], dtype=np.int32)[:, np.newaxis]
         texel_diffs = np.matmul(uv_diffs, img_size)
         texel_lengths = np.linalg.norm(texel_diffs, axis=1)
 
-        non_zero = (texel_lengths != 0)
+        non_zero = texel_lengths != 0
         texel_size = xyz_lengths[non_zero] / texel_lengths[non_zero]
 
         return np.median(texel_size)
