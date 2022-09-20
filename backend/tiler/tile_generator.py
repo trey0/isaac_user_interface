@@ -113,11 +113,7 @@ class TileGenerator(object):
         dosys(f"cd {common_dir} && example_repack {crop_tile_base} {repack_tile_base}")
 
     def generate_tile(self, geom, tile):
-        print(f"generate_tile {tile}")
-        print(f"geom bbox {geom.get_bounding_box()}")
         geom = geom.get_cropped(self.ts.get_bounding_box(tile))
-        print(f"tile bbox {self.ts.get_bounding_box(tile)}")
-        print(f"empty {geom.is_empty()}")
         if geom.is_empty():
             return
 

@@ -59,13 +59,6 @@ def garbage_collect(in_refs, in_objects):
     return out_refs, out_objects
 
 
-def get_side_lengths(tris):
-    print(f"tris shape {tris.shape}")
-    # dtris = np.diff(tris, axis=1, append=tris[:, 0, :])
-    dtris = np.diff(tris, axis=1)
-    return np.linalg.norm(dtris, axis=2)
-
-
 class MtlLib(object):
     def __init__(self, input_path, materials, lines):
         self.input_path = input_path
@@ -127,14 +120,15 @@ class MtlLib(object):
 
 
 class Geometry(object):
-    def __init__(self, input_path, v, vt, vn, f, mtllib, other_cmds):
+    def __init__(self, input_path, v, vt, vn, f, mtllib, usemtl, f_mtl):
         self.input_path = input_path
         self.v = v
         self.vt = vt
         self.vn = vn
         self.f = f
         self.mtllib = mtllib
-        self.other_cmds = other_cmds
+        self.usemtl = usemtl
+        self.f_mtl = f_mtl
 
     @classmethod
     def read(cls, input_path):
@@ -145,7 +139,8 @@ class Geometry(object):
         vn = array.array("d")
         f = array.array("l")
         mtllib = None
-        other_cmds = []
+        usemtl = []
+        f_mtl = array.array("l")
 
         with open(input_path, "r", encoding="utf-8") as inp:
             for line in inp:
@@ -175,6 +170,7 @@ class Geometry(object):
                     assert len(args) == 3
                     for a in args:
                         f.extend(parse_face_vertex(a))
+                    f_mtl.append(len(usemtl) - 1)
 
                 elif cmd == "mtllib":
                     assert len(args) == 1
@@ -182,8 +178,9 @@ class Geometry(object):
                     input_mtl_path = os.path.join(os.path.dirname(input_path), mtl_path)
                     mtllib = MtlLib.read(input_mtl_path)
 
-                elif cmd in ("usemtl",):
-                    other_cmds.append(line)
+                elif cmd == "usemtl":
+                    assert len(args) == 1
+                    usemtl.append(args[0])
 
                 else:
                     print(
@@ -195,11 +192,12 @@ class Geometry(object):
         vt = np.array(vt, dtype=np.float64).reshape((-1, 2))
         vn = np.array(vn, dtype=np.float64).reshape((-1, 3))
         f = np.array(f, dtype=np.int32).reshape((-1, 3, 3))
+        f_mtl = np.array(f_mtl, dtype=np.int32)
 
         # convert from OBJ 1-based indexing to Python 0-based indexing
         f = f - 1
 
-        return Geometry(input_path, v, vt, vn, f, mtllib, other_cmds)
+        return Geometry(input_path, v, vt, vn, f, mtllib, usemtl, f_mtl)
 
     def write(self, output_path, texture_map={}):
         output_path = os.path.realpath(output_path)
@@ -214,8 +212,6 @@ class Geometry(object):
                     output_mtl_path, os.path.dirname(output_path)
                 )
                 out.write(f"mtllib {mtl_from_output_path}\n")
-            for line in self.other_cmds:
-                out.write(line)
             for v in self.v:
                 out.write("v %s %s %s\n" % (*v,))
             for vt in self.vt:
@@ -226,14 +222,20 @@ class Geometry(object):
             # convert from Python 0-based indexing to OBJ 1-based indexing
             out_f = self.f + 1
 
-            for f in out_f:
+            last_f_mtl = None
+            for f, f_mtl in zip(out_f, self.f_mtl):
+                if f_mtl != last_f_mtl:
+                    out.write("\n")
+                    out.write(f"usemtl {self.usemtl[f_mtl]}\n")
                 out.write("f %s %s %s\n" % tuple(dump_face_vertex(v) for v in f))
+                last_f_mtl = f_mtl
 
     def get_cropped(self, bbox):
         # keep faces whose centroids are within the bounding box
         face_centroids = np.mean(self.v[self.f[:, :, 0], :], axis=1)
         keep_faces = bbox.is_inside(face_centroids)
         f = self.f[keep_faces]
+        f_mtl = self.f_mtl[keep_faces]
 
         # keep only the vertex information that is referenced by the remaining
         # faces
@@ -241,7 +243,7 @@ class Geometry(object):
         f[:, :, 1], vt = garbage_collect(f[:, :, 1], self.vt)
         f[:, :, 2], vn = garbage_collect(f[:, :, 2], self.vn)
 
-        return Geometry(self.input_path, v, vt, vn, f, self.mtllib, self.other_cmds)
+        return Geometry(self.input_path, v, vt, vn, f, self.mtllib, self.usemtl, f_mtl)
 
     def get_bounding_box(self):
         return BoundingBox(np.amin(self.v, axis=0), np.amax(self.v, axis=0))
