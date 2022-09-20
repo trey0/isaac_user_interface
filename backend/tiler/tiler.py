@@ -69,7 +69,7 @@ def tiler(in_obj, out_dir):
         config["max_zoom"],
         config["target_texels_per_tile"],
     )
-    geom = Geometry.read_obj(in_obj)
+    geom = Geometry.read(in_obj)
 
     if 0:
         test_out = os.path.join(out_dir, "test.obj")

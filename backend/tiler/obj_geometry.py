@@ -66,41 +66,58 @@ def get_side_lengths(tris):
     return np.linalg.norm(dtris, axis=2)
 
 
-MAP_KD_REGEX = re.compile(r"map_Kd\s+(.*)$")
-
-
-class Mtl(object):
-    def __init__(self, input_path, texture_images, lines):
+class MtlLib(object):
+    def __init__(self, input_path, materials, lines):
         self.input_path = input_path
-        self.texture_images = texture_images
+        self.materials = materials
         self.lines = lines
 
     @classmethod
-    def read_mtl(cls, input_path):
+    def read(cls, input_path):
         input_path = os.path.realpath(input_path)
 
         lines = []
-        texture_images = []
+        materials = {}
+        mtl_name = None
         with open(input_path, "r", encoding="utf-8") as inp:
             for line in inp:
                 lines.append(line)
-                m = MAP_KD_REGEX.search(line)
-                if m:
-                    mtl_image_path = m.group(1)
+                if line == "#":
+                    continue
+                fields = line.split(None, 1)
+                if len(fields) < 2:
+                    continue
+                cmd, arg = fields
+                arg = arg.rstrip()
+
+                if cmd == "newmtl":
+                    mtl_name = arg
+
+                elif cmd == "map_Kd":
+                    mtl_image_path = arg
                     full_image_path = os.path.realpath(
                         os.path.join(os.path.dirname(input_path), mtl_image_path)
                     )
                     img = cv2.imread(full_image_path)
-                    texture_images.append((mtl_image_path, img))
+                    materials[mtl_name] = (mtl_image_path, img)
 
-        return Mtl(input_path, texture_images, lines)
+        return MtlLib(input_path, materials, lines)
 
-    def write_mtl(self, output_path, texture_map):
+    def write(self, output_path, texture_map):
         with open(output_path, "w", encoding="utf-8") as out:
             for line in self.lines:
-                m = MAP_KD_REGEX.search(line)
-                if m:
-                    input_texture_image = m.group(1)
+                if line == "#":
+                    out.write(line)
+                    continue
+                fields = line.split(None, 1)
+                if len(fields) < 2:
+                    out.write(line)
+                    continue
+                cmd, arg = fields
+                arg = arg.rstrip()
+
+                if cmd == "map_Kd":
+                    input_texture_image = arg
                     output_texture_image = texture_map.get(
                         input_texture_image, input_texture_image
                     )
@@ -110,24 +127,24 @@ class Mtl(object):
 
 
 class Geometry(object):
-    def __init__(self, input_path, v, vt, vn, f, mtl, other_cmds):
+    def __init__(self, input_path, v, vt, vn, f, mtllib, other_cmds):
         self.input_path = input_path
         self.v = v
         self.vt = vt
         self.vn = vn
         self.f = f
-        self.mtl = mtl
+        self.mtllib = mtllib
         self.other_cmds = other_cmds
 
     @classmethod
-    def read_obj(cls, input_path):
+    def read(cls, input_path):
         input_path = os.path.realpath(input_path)
 
         v = array.array("d")
         vt = array.array("d")
         vn = array.array("d")
         f = array.array("l")
-        mtl = None
+        mtllib = None
         other_cmds = []
 
         with open(input_path, "r", encoding="utf-8") as inp:
@@ -163,7 +180,7 @@ class Geometry(object):
                     assert len(args) == 1
                     mtl_path = args[0]
                     input_mtl_path = os.path.join(os.path.dirname(input_path), mtl_path)
-                    mtl = Mtl.read_mtl(args[0])
+                    mtllib = MtlLib.read(input_mtl_path)
 
                 elif cmd in ("usemtl",):
                     other_cmds.append(line)
@@ -182,17 +199,17 @@ class Geometry(object):
         # convert from OBJ 1-based indexing to Python 0-based indexing
         f = f - 1
 
-        return Geometry(input_path, v, vt, vn, f, mtl, other_cmds)
+        return Geometry(input_path, v, vt, vn, f, mtllib, other_cmds)
 
-    def write_obj(self, output_path, texture_map={}):
+    def write(self, output_path, texture_map={}):
         output_path = os.path.realpath(output_path)
 
-        if self.mtl:
+        if self.mtllib:
             output_mtl_path = os.path.splitext(output_path)[0] + ".mtl"
-            self.mtl.write_mtl(output_mtl_path, texture_map)
+            self.mtllib.write(output_mtl_path, texture_map)
 
         with open(output_path, "w", encoding="utf-8") as out:
-            if self.mtl:
+            if self.mtllib:
                 mtl_from_output_path = os.path.relpath(
                     output_mtl_path, os.path.dirname(output_path)
                 )
@@ -224,7 +241,7 @@ class Geometry(object):
         f[:, :, 1], vt = garbage_collect(f[:, :, 1], self.vt)
         f[:, :, 2], vn = garbage_collect(f[:, :, 2], self.vn)
 
-        return Geometry(self.input_path, v, vt, vn, f, self.mtl, self.other_cmds)
+        return Geometry(self.input_path, v, vt, vn, f, self.mtllib, self.other_cmds)
 
     def get_bounding_box(self):
         return BoundingBox(np.amin(self.v, axis=0), np.amax(self.v, axis=0))
@@ -243,8 +260,8 @@ class Geometry(object):
         uv_tris = self.vt[self.f[:, :, 1], :]
         uv_diffs = np.diff(uv_tris, axis=1).reshape((-1, 2))
 
-        assert len(self.mtl.texture_images) == 1
-        texture_path, texture_img = self.mtl.texture_images[0]
+        assert len(self.mtllib.materials) == 1
+        texture_path, texture_img = next(iter(self.mtllib.materials.values()))
         img_size = np.array(texture_img.shape[:2], dtype=np.int32)[:, np.newaxis]
         texel_diffs = np.matmul(uv_diffs, img_size)
         texel_lengths = np.linalg.norm(texel_diffs, axis=1)

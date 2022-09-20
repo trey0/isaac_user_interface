@@ -68,12 +68,12 @@ class TileGenerator(object):
     def write_crop_tile(self, geom, tile):
         crop_tile_path = self.get_crop_tile_path(geom, tile)
         os.makedirs(os.path.dirname(crop_tile_path), exist_ok=True)
-        geom.write_obj(crop_tile_path, self.zoom_texture_map.get(tile.zoom, {}))
+        geom.write(crop_tile_path, self.zoom_texture_map.get(tile.zoom, {}))
 
     def scale_texture_images(self, geom, tile):
         texture_map = self.zoom_texture_map.setdefault(tile.zoom, {})
-        assert len(geom.mtl.texture_images) == 1
-        for input_img_path, input_img in geom.mtl.texture_images:
+        assert len(geom.mtllib.materials) == 1
+        for input_img_path, input_img in geom.mtllib.materials.values():
             if input_img_path in texture_map:
                 continue
 
