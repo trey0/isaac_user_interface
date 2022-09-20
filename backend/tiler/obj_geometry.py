@@ -253,22 +253,25 @@ class Geometry(object):
 
     def get_median_texel_size(self):
         xyz_tris = self.v[self.f[:, :, 0], :]
-        # This is only using two sides of each triangle. We could probably fix
-        # it to use all three with the append=... arg to np.diff. A bit hard to figure
-        # out exactly what to pass it. Same goes for uv_diffs below.
-        xyz_diffs = np.diff(xyz_tris, axis=1).reshape((-1, 3))
-        xyz_lengths = np.linalg.norm(xyz_diffs, axis=1)
+        xyz_side_diffs = np.diff(xyz_tris, axis=1, append=xyz_tris[:, 0:1, :]).reshape(
+            (-1, 3)
+        )
+        xyz_side_lengths = np.linalg.norm(xyz_side_diffs, axis=1)
+
+        texture_image_sizes = [
+            self.mtllib.materials[mtl_name][1].shape[:2] for mtl_name in self.usemtl
+        ]
+        texture_image_sizes = np.array(texture_image_sizes, dtype=np.int32)
+        f_image_size = texture_image_sizes[self.f_mtl, :]
 
         uv_tris = self.vt[self.f[:, :, 1], :]
-        uv_diffs = np.diff(uv_tris, axis=1).reshape((-1, 2))
+        texel_tris = uv_tris * f_image_size[:, np.newaxis, :]
+        texel_side_diffs = np.diff(
+            texel_tris, axis=1, append=texel_tris[:, 0:1, :]
+        ).reshape((-1, 2))
+        texel_side_lengths = np.linalg.norm(texel_side_diffs, axis=1)
 
-        assert len(self.mtllib.materials) == 1
-        texture_path, texture_img = next(iter(self.mtllib.materials.values()))
-        img_size = np.array(texture_img.shape[:2], dtype=np.int32)[:, np.newaxis]
-        texel_diffs = np.matmul(uv_diffs, img_size)
-        texel_lengths = np.linalg.norm(texel_diffs, axis=1)
-
-        non_zero = texel_lengths != 0
-        texel_size = xyz_lengths[non_zero] / texel_lengths[non_zero]
+        non_zero = (texel_side_lengths != 0)
+        texel_size = xyz_side_lengths[non_zero] / texel_side_lengths[non_zero]
 
         return np.median(texel_size)
