@@ -44,7 +44,7 @@ FUZE_TILE_CONFIG = {
     "origin": [-0.04, -0.04, 0],
     "scale": 0.32,
     "min_zoom": 0,
-    "target_texels_per_tile": 512,
+    "target_texels_per_tile": 256,
 }
 
 
