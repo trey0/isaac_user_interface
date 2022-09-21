@@ -37,7 +37,6 @@ ISS_TILE_CONFIG = {
     "origin": [-8, -12, 3],
     "scale": 32,
     "min_zoom": 0,
-    "max_zoom": 6,
     "target_texels_per_tile": 512,
 }
 
@@ -45,8 +44,7 @@ FUZE_TILE_CONFIG = {
     "origin": [-0.04, -0.04, 0],
     "scale": 0.32,
     "min_zoom": 0,
-    "max_zoom": 2,
-    "target_texels_per_tile": 32,
+    "target_texels_per_tile": 512,
 }
 
 
@@ -55,6 +53,7 @@ def tiler(in_obj, out_dir):
         logging.warning(f"Output directory {out_dir} already exists, not overwriting")
         return
 
+    # config = ISS_TILE_CONFIG
     config = FUZE_TILE_CONFIG
 
     ts = TileSystem(
@@ -66,7 +65,6 @@ def tiler(in_obj, out_dir):
         "out",
         ts,
         config["min_zoom"],
-        config["max_zoom"],
         config["target_texels_per_tile"],
     )
     geom = Geometry.read(in_obj)
