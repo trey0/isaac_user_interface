@@ -24,9 +24,13 @@ import numpy as np
 from obj_geometry import Geometry
 from tile_system import Tile, TileSystem
 
-CONVERT_CMD = "convert"
-# CONVERT_CMD = "convert -limit memory 8GiB -limit width 30KP -limit height 30KP"
-UPSAMPLE_FACTOR = 3.0
+
+# UPSAMPLE_FACTOR = 3.0
+
+# A larger value improves quality, but unfortunately, we run into an error in
+# example_repack's image loading library if it tries to unpack an image that
+# will occupy more than ~ 1 GB memory (it uses 32-bit byte offsets).
+UPSAMPLE_FACTOR = 1.0
 
 
 def dosys(cmd, exc_on_error=True):
@@ -40,6 +44,7 @@ def dosys(cmd, exc_on_error=True):
 
 
 def resize_to(out_dim, in_path, out_path, scale_factor_limit=None):
+    logging.info(f"resize_to {out_dim} {in_path} {out_path} {scale_factor_limit}")
     in_img = cv2.imread(in_path, cv2.IMREAD_UNCHANGED)
     in_h, in_w, num_channels = in_img.shape
 
@@ -58,11 +63,10 @@ def resize_to(out_dim, in_path, out_path, scale_factor_limit=None):
 
 
 def resize_scale(scale_factor, in_path, out_path):
-    print(f"in_path {in_path}")
+    logging.info(f"resize_scale {scale_factor} {in_path} {out_path}")
     in_img = cv2.imread(in_path, cv2.IMREAD_UNCHANGED)
     in_h, in_w, num_channels = in_img.shape
 
-    out_dim0 = tuple([scale_factor * val for val in (in_w, in_h)])
     out_dim = tuple([int(round(scale_factor * val)) for val in (in_w, in_h)])
 
     out_img = cv2.resize(in_img, out_dim, interpolation=cv2.INTER_CUBIC)
@@ -100,7 +104,7 @@ class TileGenerator(object):
             for yi in range(min_idx[1], max_idx[1]):
                 for zi in range(min_idx[2], max_idx[2]):
                     tile = Tile(self.min_zoom, xi, yi, zi)
-                    self.generate_tile(geom, tile)
+                    self.generate_tile(geom, tile, True)
 
     def get_crop_tile_path(self, tile):
         return (
@@ -113,7 +117,7 @@ class TileGenerator(object):
     def get_downsample_tile_path(self, tile):
         return os.path.join(self.out_path, "build", self.ts.get_path(tile)) + "_downsample"
 
-    def crop_tile(self, geom, tile):
+    def write_cropped_tile(self, geom, tile):
         crop_tile_path = self.get_crop_tile_path(tile)
         os.makedirs(os.path.dirname(crop_tile_path), exist_ok=True)
         geom.write(crop_tile_path + ".obj", self.texture_map)
@@ -147,32 +151,56 @@ class TileGenerator(object):
     def get_scale_factor_limit(self):
         return (1.0 / UPSAMPLE_FACTOR)
 
-    def downsample_texture(self, geom, tile):
+    def downsample_texture(self, geom, tile, force_full_res):
         repack_tile_path = self.get_repack_tile_path(tile)
         downsample_tile_path = self.get_downsample_tile_path(tile)
 
-        scale_percent = 100. / UPSAMPLE_FACTOR
-        #dosys(
-        #    f"{CONVERT_CMD} -resize {scale_percent}% {repack_tile_path}.png {downsample_tile_path}.jpg"
-        #)
-        scale_factor = resize_to(
-            (self.target_texels_per_tile, self.target_texels_per_tile),
-            repack_tile_path + ".png",
-            downsample_tile_path + ".jpg",
-            scale_factor_limit=self.get_scale_factor_limit(),
-        )
-        dosys(f"cp {repack_tile_path}.obj {downsample_tile_path}.obj")
+        repack_tile_image = repack_tile_path + ".png"
+        downsample_tile_image = downsample_tile_path + ".jpg"
+
+        if force_full_res:
+            scale_factor = self.get_scale_factor_limit()
+            resize_scale(
+                scale_factor,
+                repack_tile_image,
+                downsample_tile_image,
+            )
+        else:
+            scale_factor = resize_to(
+                (self.target_texels_per_tile, self.target_texels_per_tile),
+                repack_tile_image,
+                downsample_tile_image,
+                scale_factor_limit=self.get_scale_factor_limit(),
+            )
+
+        repack_geom = Geometry.read(repack_tile_path + ".obj")
+        assert len(repack_geom.mtllib.materials) == 1
+        rel_repack_tile_image, repack_mtl_img = next(iter(repack_geom.mtllib.materials.values()))
+        rel_downsample_tile_image = os.path.basename(downsample_tile_image)
+        downsample_texture_map = {
+            rel_repack_tile_image: rel_downsample_tile_image,
+        }
+        repack_geom.write(downsample_tile_path + ".obj", downsample_texture_map)
 
         return scale_factor
 
-    def generate_tile(self, geom, tile):
-        geom = geom.get_cropped(self.ts.get_bounding_box(tile))
+    def generate_tile(self, parent_geom, tile, root):
+        geom = parent_geom.get_cropped(self.ts.get_bounding_box(tile))
         if geom.is_empty():
             return
 
-        self.crop_tile(geom, tile)
+        self.write_cropped_tile(geom, tile)
         self.repack_texture(geom, tile)
-        scale_factor = self.downsample_texture(geom, tile)
+
+        # If cropping didn't discard any faces, go ahead and force full-res
+        # output at this zoom level. Further splitting the tile is not likely
+        # to help. This is a corner case for our poor-man's cropping approach
+        # that discards faces but can't crop a face to fit a tile. The
+        # recursion can blow up if it encounters a face whose full-res texture
+        # image is larger than the target tile image size.
+        force_full_res = (not root and (len(parent_geom.f) == len(geom.f)))
+
+        scale_factor = self.downsample_texture(geom, tile, force_full_res)
 
         # don't expand children if this tile is already at the full
         # source resolution
@@ -184,4 +212,4 @@ class TileGenerator(object):
             child = Tile(
                 tile.zoom + 1, 2 * tile.xi + xo, 2 * tile.yi + yo, 2 * tile.zi + zo
             )
-            self.generate_tile(geom, child)
+            self.generate_tile(geom, child, False)

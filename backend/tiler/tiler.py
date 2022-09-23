@@ -20,6 +20,7 @@ Turn an OBJ file into 3D Tiles
 """
 
 import argparse
+import json
 import logging
 import os
 
@@ -33,28 +34,33 @@ def mkdir_for_file(path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
 
-ISS_TILE_CONFIG = {
-    "origin": [-8, -12, 3],
-    "scale": 32,
-    "min_zoom": 0,
-    "target_texels_per_tile": 512,
-}
-
-FUZE_TILE_CONFIG = {
-    "origin": [-0.04, -0.04, 0],
-    "scale": 0.32,
-    "min_zoom": 0,
-    "target_texels_per_tile": 256,
-}
+DEFAULT_TARGET_TEXELS_PER_TILE = 512
 
 
-def tiler(in_obj, out_dir):
+def get_auto_config(geom):
+    bbox = geom.get_bounding_box()
+    centroid = 0.5 * (bbox.min_corner + bbox.max_corner)
+    box_dims = bbox.max_corner - bbox.min_corner
+    max_dim = np.max(box_dims)
+    origin = centroid - 0.5 * 1.1 * box_dims
+    return {
+        "origin": list(origin),
+        "scale": 1.1 * max_dim,
+        "min_zoom": 0,
+    }
+
+
+def tiler(in_obj, out_dir, target_texels_per_tile):
     if os.path.exists(out_dir):
         logging.warning(f"Output directory {out_dir} already exists, not overwriting")
         return
 
-    # config = ISS_TILE_CONFIG
-    config = FUZE_TILE_CONFIG
+    geom = Geometry.read(in_obj)
+
+    # Could read the config from a file instead if we want to be consistent from
+    # run to run.
+    config = get_auto_config(geom)
+    logging.info("%s", json.dumps(config, indent=4, sort_keys=True))
 
     ts = TileSystem(
         np.array(config["origin"], dtype=np.float64),
@@ -65,16 +71,8 @@ def tiler(in_obj, out_dir):
         "out",
         ts,
         config["min_zoom"],
-        config["target_texels_per_tile"],
+        target_texels_per_tile,
     )
-    geom = Geometry.read(in_obj)
-
-    if 0:
-        test_out = os.path.join(out_dir, "test.obj")
-        mkdir_for_file(test_out)
-        geom.write_obj(test_out)
-
-    print(f"texel size {geom.get_median_texel_size()}")
 
     generator.generate(geom)
 
@@ -84,11 +82,16 @@ def main():
         description=__doc__,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    parser.add_argument("-s", "--image_size",
+                        help="hint desired resolution for tile texture images",
+                        nargs="?",
+                        type=int,
+                        default=DEFAULT_TARGET_TEXELS_PER_TILE)
     parser.add_argument("in_obj", help="input obj file")
     parser.add_argument("out_dir", help="output directory for 3D tiles")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    tiler(args.in_obj, args.out_dir)
+    tiler(args.in_obj, args.out_dir, args.image_size)
 
 
 if __name__ == "__main__":

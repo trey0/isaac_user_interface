@@ -114,7 +114,7 @@ class MtlLib(object):
                     output_texture_image = texture_map.get(
                         input_texture_image, input_texture_image
                     )
-                    out.write(f"map_Kd {output_texture_image}")
+                    out.write(f"map_Kd {output_texture_image}\n")
                 else:
                     out.write(line)
 
@@ -253,10 +253,9 @@ class Geometry(object):
 
     def get_median_texel_size(self):
         xyz_tris = self.v[self.f[:, :, 0], :]
-        xyz_side_diffs = np.diff(xyz_tris, axis=1, append=xyz_tris[:, 0:1, :]).reshape(
-            (-1, 3)
-        )
-        xyz_side_lengths = np.linalg.norm(xyz_side_diffs, axis=1)
+        xyz_side_diffs = np.diff(xyz_tris, axis=1, append=xyz_tris[:, 0:1, :])
+        xyz_side_lengths0 = np.linalg.norm(xyz_side_diffs, axis=2)
+        xyz_side_lengths = xyz_side_lengths0.reshape(-1)
 
         texture_image_sizes = [
             self.mtllib.materials[mtl_name][1].shape[:2] for mtl_name in self.usemtl
@@ -268,10 +267,24 @@ class Geometry(object):
         texel_tris = uv_tris * f_image_size[:, np.newaxis, :]
         texel_side_diffs = np.diff(
             texel_tris, axis=1, append=texel_tris[:, 0:1, :]
-        ).reshape((-1, 2))
-        texel_side_lengths = np.linalg.norm(texel_side_diffs, axis=1)
+        )
+        texel_side_lengths0 = np.linalg.norm(texel_side_diffs, axis=2)
+        texel_side_lengths = texel_side_lengths0.reshape(-1)
 
         non_zero = (texel_side_lengths != 0)
         texel_size = xyz_side_lengths[non_zero] / texel_side_lengths[non_zero]
 
-        return np.median(texel_size)
+        median_texel_size = np.median(texel_size)
+
+        if 0:
+            print(f"\n=== xyz_tris ===\n\n{xyz_tris[:10, :, :]}")
+            print(f"\n=== xyz_side_diffs (cm) ===\n\n{100 * xyz_side_diffs[:10, :, :]}")
+            print(f"\n=== xyz_side_lengths0 (cm) ===\n\n{100 * xyz_side_lengths0[:10, :]}")
+            print(f"\n=== texture_image_sizes ===\n\n{texture_image_sizes}")
+            print(f"\n=== uv_tris ===\n\n{uv_tris[:10, :, :]}")
+            print(f"\n=== texel_tris ===\n\n{texel_tris[:10, :, :]}")
+            print(f"\n=== texel_side_diffs ===\n\n{texel_side_diffs[:10, :, :]}")
+            print(f"\n=== texel_side_lengths0 ===\n\n{texel_side_lengths0[:10, :]}")
+            print(f"\n=== median_texel_size (cm) ===\n\n{100 * median_texel_size}")
+
+        return median_texel_size
