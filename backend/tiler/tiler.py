@@ -50,7 +50,7 @@ def get_auto_config(geom):
     }
 
 
-def tiler(in_obj, out_dir, target_texels_per_tile):
+def tiler(in_obj, out_dir, target_texels_per_tile, debug_glb):
     if os.path.exists(out_dir):
         logging.warning(f"Output directory {out_dir} already exists, not overwriting")
         return
@@ -72,6 +72,7 @@ def tiler(in_obj, out_dir, target_texels_per_tile):
         ts,
         config["min_zoom"],
         target_texels_per_tile,
+        debug_glb,
     )
 
     generator.generate(geom)
@@ -82,16 +83,27 @@ def main():
         description=__doc__,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("-s", "--image_size",
-                        help="hint desired resolution for tile texture images",
-                        nargs="?",
-                        type=int,
-                        default=DEFAULT_TARGET_TEXELS_PER_TILE)
+    parser.add_argument(
+        "-s",
+        "--image_size",
+        help="hint desired resolution for tile texture images",
+        nargs="?",
+        type=int,
+        default=DEFAULT_TARGET_TEXELS_PER_TILE,
+    )
+    parser.add_argument(
+        "-d",
+        "--debug_glb",
+        help="output GLB format tiles and debug_tile_viewer.html",
+        nargs="?",
+        type=bool,
+        default=False,
+    )
     parser.add_argument("in_obj", help="input obj file")
     parser.add_argument("out_dir", help="output directory for 3D tiles")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    tiler(args.in_obj, args.out_dir, args.image_size)
+    tiler(args.in_obj, args.out_dir, args.image_size, args.debug_glb)
 
 
 if __name__ == "__main__":

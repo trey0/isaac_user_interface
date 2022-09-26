@@ -1,0 +1,77 @@
+import * as THREE from 'three';
+
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+let camera_g, scene_g, renderer_g;
+
+function load_glb(loader, scene_g, glb_path) {
+    loader.load(glb_path, function (gltf) {
+        scene_g.add(gltf.scene);
+        render();
+    });
+}
+
+
+function onWindowResize() {
+    camera_g.aspect = window.innerWidth / window.innerHeight;
+    camera_g.updateProjectionMatrix();
+
+    renderer_g.setSize(window.innerWidth, window.innerHeight);
+
+    render();
+}
+
+function render() {
+    renderer_g.render(scene_g, camera_g);
+}
+
+function init() {
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    // set to rough centroid of the thing you want to look at
+    const cx = 12.035
+    const cy = -8.665;
+    const cz = 5.1266;
+
+    const camera_distance = 3.0;
+
+    camera_g = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.05, 1000);
+    camera_g.position.set(cx - camera_distance, cy, cz);
+    camera_g.up = new THREE.Vector3(0, 0, -1);
+
+    scene_g = new THREE.Scene();
+
+    const light = new THREE.AmbientLight(0xffffff);
+    scene_g.add(light);
+
+    const loader = new GLTFLoader();
+    const models_str = `{{ leaf_tiles }}`;
+    const models = models_str.split(/\r?\n/);
+    for (const model of models) {
+	if (model == "") continue;
+	load_glb(loader, scene_g, model);
+    }
+
+    renderer_g = new THREE.WebGLRenderer({antialias: true});
+    renderer_g.setPixelRatio(window.devicePixelRatio);
+    renderer_g.setSize(window.innerWidth, window.innerHeight);
+    renderer_g.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer_g.toneMappingExposure = 1;
+    renderer_g.outputEncoding = THREE.sRGBEncoding;
+    container.appendChild(renderer_g.domElement);
+
+    const controls = new OrbitControls(camera_g, renderer_g.domElement);
+    controls.addEventListener("change", render); // use if there is no animation loop
+    controls.minDistance = 0.1;
+    controls.maxDistance = 10;
+    controls.target.set(cx, cy, cz);
+    controls.update();
+
+    window.addEventListener("resize", onWindowResize);
+}
+
+init();
+render();

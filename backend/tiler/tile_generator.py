@@ -18,6 +18,7 @@ import itertools
 import logging
 import math
 import os
+import shutil
 
 import cv2
 import numpy as np
@@ -74,11 +75,12 @@ def resize_scale(scale_factor, in_path, out_path):
 
 
 class TileGenerator(object):
-    def __init__(self, out_path, ts, min_zoom, target_texels_per_tile):
+    def __init__(self, out_path, ts, min_zoom, target_texels_per_tile, debug_glb):
         self.out_path = out_path
         self.ts = ts
         self.min_zoom = min_zoom
         self.target_texels_per_tile = target_texels_per_tile
+        self.debug_glb = debug_glb
 
         self.texture_map = {}
         self.input_texel_size = None
@@ -90,11 +92,32 @@ class TileGenerator(object):
         self.input_texel_size = geom.get_median_texel_size()
         self.scale_texture_images(geom)
 
-        leaf_tiles_path = os.path.join(self.out_path, "build", "leaf_tiles.txt")
-        with open(leaf_tiles_path, "w", encoding="utf-8") as leaf_tiles:
-            self.leaf_tiles = leaf_tiles
-            self.generate_tiles(geom)
-            del self.leaf_tiles
+        if self.debug_glb:
+            self.leaf_tiles_path = os.path.join(
+                self.out_path, "build", "leaf_tiles.txt"
+            )
+            self.leaf_tiles = open(self.leaf_tiles_path, "w", encoding="utf-8")
+
+        self.generate_tiles(geom)
+
+        if self.debug_glb:
+            self.leaf_tiles.close()
+
+            this_dir = os.path.dirname(os.path.realpath(__file__))
+            base_prefix = "debug_tile_viewer"
+
+            in_html = os.path.join(this_dir, base_prefix + ".html")
+            out_html = os.path.join(self.out_path, "build", base_prefix + ".html")
+            shutil.copyfile(in_html, out_html)
+
+            in_js = os.path.join(this_dir, base_prefix + ".js")
+            out_js = os.path.join(self.out_path, "build", base_prefix + ".js")
+            with open(self.leaf_tiles_path, "r", encoding="utf-8") as lt_in:
+                leaf_tiles = lt_in.read()
+            with open(in_js, "r", encoding="utf-8") as html_in:
+                html_text = html_in.read()
+            with open(out_js, "w", encoding="utf-8") as out:
+                out.write(html_text.replace("{{ leaf_tiles }}", leaf_tiles))
 
     def generate_tiles(self, geom):
         bbox = geom.get_bounding_box()
@@ -107,15 +130,18 @@ class TileGenerator(object):
                     self.generate_tile(geom, tile, True)
 
     def get_crop_tile_path(self, tile):
-        return (
-            os.path.join(self.out_path, "build", self.ts.get_path(tile)) + "_crop"
-        )
+        return os.path.join(self.out_path, "build", self.ts.get_path(tile)) + "_crop"
 
     def get_repack_tile_path(self, tile):
         return os.path.join(self.out_path, "build", self.ts.get_path(tile)) + "_repack"
 
     def get_downsample_tile_path(self, tile):
-        return os.path.join(self.out_path, "build", self.ts.get_path(tile)) + "_downsample"
+        return (
+            os.path.join(self.out_path, "build", self.ts.get_path(tile)) + "_downsample"
+        )
+
+    def get_output_tile_path(self, tile):
+        return os.path.join(self.out_path, "build", self.ts.get_path(tile))
 
     def write_cropped_tile(self, geom, tile):
         crop_tile_path = self.get_crop_tile_path(tile)
@@ -135,7 +161,7 @@ class TileGenerator(object):
             rel_output_img_path = os.path.join("..", "..", "..", output_base)
             self.texture_map[input_img_path] = rel_output_img_path
 
-    def repack_texture(self, geom, tile):
+    def repack_texture(self, tile):
         crop_tile_path = self.get_crop_tile_path(tile)
         repack_tile_path = self.get_repack_tile_path(tile)
 
@@ -146,10 +172,12 @@ class TileGenerator(object):
         common_dir = os.path.dirname(crop_tile_path)
         crop_tile_base = os.path.basename(crop_tile_path)
         repack_tile_base = os.path.basename(repack_tile_path)
-        dosys(f"cd {common_dir} && example_repack {crop_tile_base}.obj {repack_tile_base}")
+        dosys(
+            f"cd {common_dir} && example_repack {crop_tile_base}.obj {repack_tile_base}"
+        )
 
     def get_scale_factor_limit(self):
-        return (1.0 / UPSAMPLE_FACTOR)
+        return 1.0 / UPSAMPLE_FACTOR
 
     def downsample_texture(self, geom, tile, force_full_res):
         repack_tile_path = self.get_repack_tile_path(tile)
@@ -175,7 +203,9 @@ class TileGenerator(object):
 
         repack_geom = Geometry.read(repack_tile_path + ".obj")
         assert len(repack_geom.mtllib.materials) == 1
-        rel_repack_tile_image, repack_mtl_img = next(iter(repack_geom.mtllib.materials.values()))
+        rel_repack_tile_image, repack_mtl_img = next(
+            iter(repack_geom.mtllib.materials.values())
+        )
         rel_downsample_tile_image = os.path.basename(downsample_tile_image)
         downsample_texture_map = {
             rel_repack_tile_image: rel_downsample_tile_image,
@@ -184,13 +214,32 @@ class TileGenerator(object):
 
         return scale_factor
 
+    def convert_to_glb(self, tile):
+        downsample_tile_path = self.get_downsample_tile_path(tile)
+        downsample_tile_glb = downsample_tile_path + ".glb"
+        output_tile_glb = self.get_output_tile_path(tile) + ".glb"
+        dosys(f"obj23dtiles.js -b -i {downsample_tile_path}.obj")
+        # the -o option to obj23dtiles is apparently not respected, so do our
+        # own rename operation
+        os.rename(downsample_tile_glb, output_tile_glb)
+        return output_tile_glb
+
+    def convert_to_b3dm(self, tile):
+        downsample_tile_path = self.get_downsample_tile_path(tile)
+        downsample_tile_b3dm = downsample_tile_path + ".b3dm"
+        output_tile_b3dm = self.get_output_tile_path(tile) + ".b3dm"
+        dosys(f"obj23dtiles.js --b3dm -i {downsample_tile_path}.obj")
+        # the -o option to obj23dtiles is apparently not respected, so do our
+        # own rename operation
+        os.rename(downsample_tile_b3dm, output_tile_b3dm)
+
     def generate_tile(self, parent_geom, tile, root):
         geom = parent_geom.get_cropped(self.ts.get_bounding_box(tile))
         if geom.is_empty():
             return
 
         self.write_cropped_tile(geom, tile)
-        self.repack_texture(geom, tile)
+        self.repack_texture(tile)
 
         # If cropping didn't discard any faces, go ahead and force full-res
         # output at this zoom level. Further splitting the tile is not likely
@@ -198,14 +247,22 @@ class TileGenerator(object):
         # that discards faces but can't crop a face to fit a tile. The
         # recursion can blow up if it encounters a face whose full-res texture
         # image is larger than the target tile image size.
-        force_full_res = (not root and (len(parent_geom.f) == len(geom.f)))
+        force_full_res = not root and (len(parent_geom.f) == len(geom.f))
 
         scale_factor = self.downsample_texture(geom, tile, force_full_res)
+
+        self.convert_to_b3dm(tile)
+        if self.debug_glb:
+            output_tile_glb = self.convert_to_glb(tile)
 
         # don't expand children if this tile is already at the full
         # source resolution
         if scale_factor == self.get_scale_factor_limit():
-            self.leaf_tiles.write(self.get_downsample_tile_path(tile) + ".obj\n")
+            if self.debug_glb:
+                rel_tile_glb = os.path.relpath(
+                    output_tile_glb, os.path.dirname(self.leaf_tiles_path)
+                )
+                self.leaf_tiles.write(rel_tile_glb + "\n")
             return
 
         for xo, yo, zo in itertools.product([0, 1], repeat=3):
