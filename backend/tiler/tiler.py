@@ -50,7 +50,7 @@ def get_auto_config(geom):
     }
 
 
-def tiler(in_obj, out_dir, target_texels_per_tile, debug_glb):
+def tiler(in_obj, out_dir, target_texels_per_tile, debug_glb, debug_tileset):
     if os.path.exists(out_dir):
         logging.warning(f"Output directory {out_dir} already exists, not overwriting")
         return
@@ -73,6 +73,7 @@ def tiler(in_obj, out_dir, target_texels_per_tile, debug_glb):
         config["min_zoom"],
         target_texels_per_tile,
         debug_glb,
+        debug_tileset,
     )
 
     generator.generate(geom)
@@ -92,9 +93,14 @@ def main():
         default=DEFAULT_TARGET_TEXELS_PER_TILE,
     )
     parser.add_argument(
-        "-d",
-        "--debug_glb",
+        "--debug-glb",
         help="output GLB format tiles and debug_glb_viewer.html",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--debug-tileset",
+        help="output debug_tileset_viewer.html",
         default=False,
         action="store_true",
     )
@@ -102,7 +108,7 @@ def main():
     parser.add_argument("out_dir", help="output directory for 3D tiles")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    tiler(args.in_obj, args.out_dir, args.image_size, args.debug_glb)
+    tiler(args.in_obj, args.out_dir, args.image_size, args.debug_glb, args.debug_tileset)
 
 
 if __name__ == "__main__":

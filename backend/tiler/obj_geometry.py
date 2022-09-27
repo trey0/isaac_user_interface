@@ -199,6 +199,11 @@ class Geometry(object):
 
         return Geometry(input_path, v, vt, vn, f, mtllib, usemtl, f_mtl)
 
+    def apply_rotation(self, R):
+        v = np.matmul(self.v, R.T)
+        vn = np.matmul(self.vn, R.T)
+        return Geometry(self.input_path, v, self.vt, vn, self.f, self.mtllib, self.usemtl, self.f_mtl)
+
     def write(self, output_path, texture_map={}):
         output_path = os.path.realpath(output_path)
 

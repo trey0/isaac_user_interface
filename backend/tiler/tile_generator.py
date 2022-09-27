@@ -38,6 +38,11 @@ UPSAMPLE_FACTOR = 1.0
 # want to ensure that a tile is always rendered.
 BIG_GEOMETRIC_ERROR = 100
 
+# Apply Z-up to Y-up transform as described in:
+# https://github.com/CesiumGS/3d-tiles/blob/main/specification/README.md#tile-transforms
+Y_UP_TO_Z_UP = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], dtype=np.int32)
+Z_UP_TO_Y_UP = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.int32)
+
 def dosys(cmd, exc_on_error=True):
     logging.info("%s", cmd)
     ret = os.system(cmd)
@@ -79,12 +84,13 @@ def resize_scale(scale_factor, in_path, out_path):
 
 
 class TileGenerator(object):
-    def __init__(self, out_path, ts, min_zoom, target_texels_per_tile, debug_glb):
+    def __init__(self, out_path, ts, min_zoom, target_texels_per_tile, debug_glb, debug_tileset):
         self.out_path = out_path
         self.ts = ts
         self.min_zoom = min_zoom
         self.target_texels_per_tile = target_texels_per_tile
         self.debug_glb = debug_glb
+        self.debug_tileset = debug_tileset
 
         self.texture_map = {}
         self.input_texel_size = None
@@ -103,7 +109,7 @@ class TileGenerator(object):
             self.leaf_tiles = open(self.leaf_tiles_path, "w", encoding="utf-8")
 
         meta = {
-            "asset": {"version": 1.0},
+            "asset": {"version": "1.0"},
             "geometricError": BIG_GEOMETRIC_ERROR,
             "root": {
                 "boundingVolume": geom.get_bounding_volume(),
@@ -113,14 +119,19 @@ class TileGenerator(object):
         }
         meta["root"]["children"] = self.generate_tiles(geom)
 
-        self.write_tileset(meta)
+        tileset_path = self.write_tileset(meta)
+        self.install_file(tileset_path)
 
         if self.debug_glb:
             self.write_debug_glb_viewer(geom)
+        if self.debug_tileset:
+            self.write_debug_tileset_viewer(geom)
 
     def write_tileset(self, meta):
-        with open(self.get_tileset_path(), "w", encoding="utf-8") as out:
+        tileset_path = self.get_tileset_path()
+        with open(tileset_path, "w", encoding="utf-8") as out:
             json.dump(meta, out, ensure_ascii=False, indent=4)
+        return tileset_path
 
     def write_debug_glb_viewer(self, geom):
         self.leaf_tiles.close()
@@ -128,29 +139,54 @@ class TileGenerator(object):
         this_dir = os.path.dirname(os.path.realpath(__file__))
         base_prefix = "debug_glb_viewer"
 
-        in_html = os.path.join(this_dir, base_prefix + ".html")
-        out_html = os.path.join(self.out_path, "build", base_prefix + ".html")
-        shutil.copyfile(in_html, out_html)
+        in_html_path = os.path.join(this_dir, base_prefix + ".html")
+        out_html_path = os.path.join(self.out_path, "build", base_prefix + ".html")
+        shutil.copyfile(in_html_path, out_html_path)
 
-        in_js = os.path.join(this_dir, base_prefix + ".js")
-        out_js = os.path.join(self.out_path, "build", base_prefix + ".js")
-        with open(self.leaf_tiles_path, "r", encoding="utf-8") as lt_in:
-            leaf_tiles = lt_in.read()
-        with open(in_js, "r", encoding="utf-8") as html_in:
-            html_text = html_in.read()
+        in_js_path = os.path.join(this_dir, base_prefix + ".js")
+        out_js_path = os.path.join(self.out_path, "build", base_prefix + ".js")
+        with open(self.leaf_tiles_path, "r", encoding="utf-8") as leaf_tiles:
+            leaf_tiles_text = leaf_tiles.read()
+        with open(in_js_path, "r", encoding="utf-8") as in_js:
+            js_text = in_js.read()
 
         bbox = geom.get_bounding_box()
         centroid = 0.5 * (bbox.min_corner + bbox.max_corner)
         width = np.max(bbox.max_corner - bbox.min_corner)
-        with open(out_js, "w", encoding="utf-8") as out:
+        with open(out_js_path, "w", encoding="utf-8") as out_js:
             replace_params = (
-                ("{{ leaf_tiles }}", leaf_tiles),
+                ("{{ leaf_tiles }}", leaf_tiles_text),
                 ("{{ centroid }}", json.dumps(list(centroid))),
                 ("{{ width }}", str(width)),
             )
             for pattern, value in replace_params:
-                html_text = html_text.replace(pattern, value)
-            out.write(html_text)
+                js_text = js_text.replace(pattern, value)
+            out_js.write(js_text)
+
+    def write_debug_tileset_viewer(self, geom):
+        this_dir = os.path.dirname(os.path.realpath(__file__))
+        base_prefix = "debug_tileset_viewer"
+
+        in_html_path = os.path.join(this_dir, base_prefix + ".html")
+        out_html_path = os.path.join(self.out_path, "build", base_prefix + ".html")
+        shutil.copyfile(in_html_path, out_html_path)
+
+        in_js_path = os.path.join(this_dir, base_prefix + ".js")
+        out_js_path = os.path.join(self.out_path, "build", base_prefix + ".js")
+        with open(in_js_path, "r", encoding="utf-8") as in_js:
+            js_text = in_js.read()
+
+        bbox = geom.get_bounding_box()
+        centroid = 0.5 * (bbox.min_corner + bbox.max_corner)
+        width = np.max(bbox.max_corner - bbox.min_corner)
+        with open(out_js_path, "w", encoding="utf-8") as out_js:
+            replace_params = (
+                ("{{ centroid }}", json.dumps(list(centroid))),
+                ("{{ width }}", str(width)),
+            )
+            for pattern, value in replace_params:
+                js_text = js_text.replace(pattern, value)
+            out_js.write(js_text)
 
     def generate_tiles(self, geom):
         bbox = geom.get_bounding_box()
@@ -187,7 +223,11 @@ class TileGenerator(object):
     def write_cropped_tile(self, geom, tile):
         crop_tile_path = self.get_crop_tile_path(tile)
         os.makedirs(os.path.dirname(crop_tile_path), exist_ok=True)
-        geom.write(crop_tile_path + ".obj", self.texture_map)
+
+        # our geometry is inherently z-up but glTF specifies y-up
+        tf_geom = geom.apply_rotation(Z_UP_TO_Y_UP)
+
+        tf_geom.write(crop_tile_path + ".obj", self.texture_map)
 
     def scale_texture_images(self, geom):
         for input_img_path, input_img in geom.mtllib.materials.values():
@@ -270,6 +310,18 @@ class TileGenerator(object):
         # the -o option to obj23dtiles is apparently not respected, so do our
         # own rename operation
         os.rename(downsample_tile_b3dm, output_tile_b3dm)
+        self.install_file(output_tile_b3dm)
+
+    def install_file(self, build_path):
+        suffix = os.path.relpath(
+            os.path.realpath(build_path),
+            os.path.realpath(os.path.join(self.out_path, "build"))
+        )
+        install_path = os.path.realpath(os.path.join(self.out_path, "tiles", suffix))
+        install_dir = os.path.dirname(install_path)
+        os.makedirs(install_dir, mode=0o755, exist_ok=True)
+        shutil.copyfile(build_path, install_path)
+        os.chmod(install_path, 0o644)
 
     def generate_tile(self, parent_geom, tile, root, parent_max_error):
         geom = parent_geom.get_cropped(self.ts.get_bounding_box(tile))
