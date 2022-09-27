@@ -248,6 +248,18 @@ class Geometry(object):
     def get_bounding_box(self):
         return BoundingBox(np.amin(self.v, axis=0), np.amax(self.v, axis=0))
 
+    def get_bounding_volume(self):
+        """
+        Return bounding box in 3D Tiles boundingVolume format.
+        """
+        bbox = self.get_bounding_box()
+        centroid = 0.5 * (bbox.min_corner + bbox.max_corner)
+        hl = 0.5 * (bbox.max_corner - bbox.min_corner)
+        x_hl = [hl[0], 0, 0]
+        y_hl = [0, hl[1], 0]
+        z_hl = [0, 0, hl[2]]
+        return {"box": list(centroid) + x_hl + y_hl + z_hl}
+
     def is_empty(self):
         return self.f.size == 0
 

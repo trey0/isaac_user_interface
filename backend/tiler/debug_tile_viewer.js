@@ -31,12 +31,10 @@ function init() {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
-    // set to rough centroid of the thing you want to look at
-    const cx = 12.035
-    const cy = -8.665;
-    const cz = 5.1266;
+    // set to the center of what you want to look at
+    const [cx, cy, cz] = {{ centroid }};
 
-    const camera_distance = 3.0;
+    const camera_distance = {{ width }};
 
     camera_g = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.05, 1000);
     camera_g.position.set(cx - camera_distance, cy, cz);
@@ -65,8 +63,8 @@ function init() {
 
     const controls = new OrbitControls(camera_g, renderer_g.domElement);
     controls.addEventListener("change", render); // use if there is no animation loop
-    controls.minDistance = 0.1;
-    controls.maxDistance = 10;
+    controls.minDistance = 0.01 * camera_distance;
+    controls.maxDistance = 10 * camera_distance;
     controls.target.set(cx, cy, cz);
     controls.update();
 

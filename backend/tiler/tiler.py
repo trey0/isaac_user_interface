@@ -95,9 +95,8 @@ def main():
         "-d",
         "--debug_glb",
         help="output GLB format tiles and debug_tile_viewer.html",
-        nargs="?",
-        type=bool,
         default=False,
+        action="store_true",
     )
     parser.add_argument("in_obj", help="input obj file")
     parser.add_argument("out_dir", help="output directory for 3D tiles")

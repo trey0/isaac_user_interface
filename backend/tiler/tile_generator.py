@@ -15,6 +15,7 @@
 # permissions and limitations under the License.
 
 import itertools
+import json
 import logging
 import math
 import os
@@ -33,6 +34,9 @@ from tile_system import Tile, TileSystem
 # will occupy more than ~ 1 GB memory (it uses 32-bit byte offsets).
 UPSAMPLE_FACTOR = 1.0
 
+# This is an arbitrary big value to provide for geometric error we use when we
+# want to ensure that a tile is always rendered.
+BIG_GEOMETRIC_ERROR = 100
 
 def dosys(cmd, exc_on_error=True):
     logging.info("%s", cmd)
@@ -87,7 +91,7 @@ class TileGenerator(object):
 
     def generate(self, geom):
         if geom.is_empty():
-            return
+            return None
 
         self.input_texel_size = geom.get_median_texel_size()
         self.scale_texture_images(geom)
@@ -98,36 +102,70 @@ class TileGenerator(object):
             )
             self.leaf_tiles = open(self.leaf_tiles_path, "w", encoding="utf-8")
 
-        self.generate_tiles(geom)
+        meta = {
+            "asset": {"version": 1.0},
+            "geometricError": BIG_GEOMETRIC_ERROR,
+            "root": {
+                "boundingVolume": geom.get_bounding_volume(),
+                "geometricError": BIG_GEOMETRIC_ERROR,
+                "refine": "REPLACE",
+            },
+        }
+        meta["root"]["children"] = self.generate_tiles(geom)
+
+        self.write_tileset(meta)
 
         if self.debug_glb:
-            self.leaf_tiles.close()
+            self.write_debug_tile_viewer(geom)
 
-            this_dir = os.path.dirname(os.path.realpath(__file__))
-            base_prefix = "debug_tile_viewer"
+    def write_tileset(self, meta):
+        with open(self.get_tileset_path(), "w", encoding="utf-8") as out:
+            json.dump(meta, out, ensure_ascii=False, indent=4)
 
-            in_html = os.path.join(this_dir, base_prefix + ".html")
-            out_html = os.path.join(self.out_path, "build", base_prefix + ".html")
-            shutil.copyfile(in_html, out_html)
+    def write_debug_tile_viewer(self, geom):
+        self.leaf_tiles.close()
 
-            in_js = os.path.join(this_dir, base_prefix + ".js")
-            out_js = os.path.join(self.out_path, "build", base_prefix + ".js")
-            with open(self.leaf_tiles_path, "r", encoding="utf-8") as lt_in:
-                leaf_tiles = lt_in.read()
-            with open(in_js, "r", encoding="utf-8") as html_in:
-                html_text = html_in.read()
-            with open(out_js, "w", encoding="utf-8") as out:
-                out.write(html_text.replace("{{ leaf_tiles }}", leaf_tiles))
+        this_dir = os.path.dirname(os.path.realpath(__file__))
+        base_prefix = "debug_tile_viewer"
+
+        in_html = os.path.join(this_dir, base_prefix + ".html")
+        out_html = os.path.join(self.out_path, "build", base_prefix + ".html")
+        shutil.copyfile(in_html, out_html)
+
+        in_js = os.path.join(this_dir, base_prefix + ".js")
+        out_js = os.path.join(self.out_path, "build", base_prefix + ".js")
+        with open(self.leaf_tiles_path, "r", encoding="utf-8") as lt_in:
+            leaf_tiles = lt_in.read()
+        with open(in_js, "r", encoding="utf-8") as html_in:
+            html_text = html_in.read()
+
+        bbox = geom.get_bounding_box()
+        centroid = 0.5 * (bbox.min_corner + bbox.max_corner)
+        width = np.max(bbox.max_corner - bbox.min_corner)
+        with open(out_js, "w", encoding="utf-8") as out:
+            replace_params = (
+                ("{{ leaf_tiles }}", leaf_tiles),
+                ("{{ centroid }}", json.dumps(list(centroid))),
+                ("{{ width }}", str(width)),
+            )
+            for pattern, value in replace_params:
+                html_text = html_text.replace(pattern, value)
+            out.write(html_text)
 
     def generate_tiles(self, geom):
         bbox = geom.get_bounding_box()
         min_idx = self.ts.get_index_vec_for_pt(bbox.min_corner, self.min_zoom)
         max_idx = self.ts.get_index_vec_for_pt(bbox.max_corner, self.min_zoom) + 1
+
+        meta = []
         for xi in range(min_idx[0], max_idx[0]):
             for yi in range(min_idx[1], max_idx[1]):
                 for zi in range(min_idx[2], max_idx[2]):
                     tile = Tile(self.min_zoom, xi, yi, zi)
-                    self.generate_tile(geom, tile, True)
+                    child_meta = self.generate_tile(geom, tile, True, BIG_GEOMETRIC_ERROR)
+                    if child_meta is not None:
+                        meta.append(child_meta)
+        return meta
 
     def get_crop_tile_path(self, tile):
         return os.path.join(self.out_path, "build", self.ts.get_path(tile)) + "_crop"
@@ -142,6 +180,9 @@ class TileGenerator(object):
 
     def get_output_tile_path(self, tile):
         return os.path.join(self.out_path, "build", self.ts.get_path(tile))
+
+    def get_tileset_path(self):
+        return os.path.join(self.out_path, "build", "tileset.json")
 
     def write_cropped_tile(self, geom, tile):
         crop_tile_path = self.get_crop_tile_path(tile)
@@ -176,9 +217,6 @@ class TileGenerator(object):
             f"cd {common_dir} && example_repack {crop_tile_base}.obj {repack_tile_base}"
         )
 
-    def get_scale_factor_limit(self):
-        return 1.0 / UPSAMPLE_FACTOR
-
     def downsample_texture(self, geom, tile, force_full_res):
         repack_tile_path = self.get_repack_tile_path(tile)
         downsample_tile_path = self.get_downsample_tile_path(tile)
@@ -187,7 +225,7 @@ class TileGenerator(object):
         downsample_tile_image = downsample_tile_path + ".jpg"
 
         if force_full_res:
-            scale_factor = self.get_scale_factor_limit()
+            scale_factor = 1.0 / UPSAMPLE_FACTOR
             resize_scale(
                 scale_factor,
                 repack_tile_image,
@@ -198,7 +236,7 @@ class TileGenerator(object):
                 (self.target_texels_per_tile, self.target_texels_per_tile),
                 repack_tile_image,
                 downsample_tile_image,
-                scale_factor_limit=self.get_scale_factor_limit(),
+                scale_factor_limit=1.0 / UPSAMPLE_FACTOR,
             )
 
         repack_geom = Geometry.read(repack_tile_path + ".obj")
@@ -212,7 +250,7 @@ class TileGenerator(object):
         }
         repack_geom.write(downsample_tile_path + ".obj", downsample_texture_map)
 
-        return scale_factor
+        return scale_factor * UPSAMPLE_FACTOR
 
     def convert_to_glb(self, tile):
         downsample_tile_path = self.get_downsample_tile_path(tile)
@@ -233,7 +271,7 @@ class TileGenerator(object):
         # own rename operation
         os.rename(downsample_tile_b3dm, output_tile_b3dm)
 
-    def generate_tile(self, parent_geom, tile, root):
+    def generate_tile(self, parent_geom, tile, root, parent_max_error):
         geom = parent_geom.get_cropped(self.ts.get_bounding_box(tile))
         if geom.is_empty():
             return
@@ -255,18 +293,31 @@ class TileGenerator(object):
         if self.debug_glb:
             output_tile_glb = self.convert_to_glb(tile)
 
-        # don't expand children if this tile is already at the full
-        # source resolution
-        if scale_factor == self.get_scale_factor_limit():
+        rel_tile_b3dm = os.path.relpath(self.get_output_tile_path(tile) + ".b3dm",
+                                        os.path.dirname(self.get_tileset_path()))
+        meta = {
+            "boundingVolume": geom.get_bounding_volume(),
+            "content": {"uri": rel_tile_b3dm},
+            "geometricError": parent_max_error,
+        }
+        max_error = self.input_texel_size / scale_factor
+
+        # this tile is a leaf if it is at the full source resolution
+        if scale_factor > 0.999:
             if self.debug_glb:
                 rel_tile_glb = os.path.relpath(
                     output_tile_glb, os.path.dirname(self.leaf_tiles_path)
                 )
                 self.leaf_tiles.write(rel_tile_glb + "\n")
-            return
+            return meta
 
+        # if not a leaf, expand children
+        meta["children"] = []
         for xo, yo, zo in itertools.product([0, 1], repeat=3):
             child = Tile(
                 tile.zoom + 1, 2 * tile.xi + xo, 2 * tile.yi + yo, 2 * tile.zi + zo
             )
-            self.generate_tile(geom, child, False)
+            child_meta = self.generate_tile(geom, child, False, max_error)
+            if child_meta is not None:
+                meta["children"].append(child_meta)
+        return meta
