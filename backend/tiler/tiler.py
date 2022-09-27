@@ -94,7 +94,7 @@ def main():
     parser.add_argument(
         "-d",
         "--debug_glb",
-        help="output GLB format tiles and debug_tile_viewer.html",
+        help="output GLB format tiles and debug_glb_viewer.html",
         default=False,
         action="store_true",
     )

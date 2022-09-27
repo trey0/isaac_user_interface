@@ -116,17 +116,17 @@ class TileGenerator(object):
         self.write_tileset(meta)
 
         if self.debug_glb:
-            self.write_debug_tile_viewer(geom)
+            self.write_debug_glb_viewer(geom)
 
     def write_tileset(self, meta):
         with open(self.get_tileset_path(), "w", encoding="utf-8") as out:
             json.dump(meta, out, ensure_ascii=False, indent=4)
 
-    def write_debug_tile_viewer(self, geom):
+    def write_debug_glb_viewer(self, geom):
         self.leaf_tiles.close()
 
         this_dir = os.path.dirname(os.path.realpath(__file__))
-        base_prefix = "debug_tile_viewer"
+        base_prefix = "debug_glb_viewer"
 
         in_html = os.path.join(this_dir, base_prefix + ".html")
         out_html = os.path.join(self.out_path, "build", base_prefix + ".html")
