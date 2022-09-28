@@ -73,7 +73,6 @@ function init() {
     controls.minDistance = 0.01 * camera_distance;
     controls.maxDistance = 1000 * camera_distance;
     controls.target.set(cx, cy, cz);
-    controls.addEventListener("change", render);
     controls.update();
 
     window.addEventListener("resize", onWindowResize);
