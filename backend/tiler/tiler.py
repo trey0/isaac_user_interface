@@ -16,7 +16,7 @@
 # permissions and limitations under the License.
 
 """
-Turn an OBJ file into 3D Tiles
+Turn an OBJ file into 3D Tiles.
 """
 
 import argparse
@@ -30,14 +30,16 @@ from tile_generator import TileGenerator
 from tile_system import TileSystem
 
 
-def mkdir_for_file(path):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-
-
 DEFAULT_TARGET_TEXELS_PER_TILE = 512
 
 
 def get_auto_config(geom):
+    """
+    Return auto-configured tile system parameters designed so the
+    (0,0,0) tile at zoom level 0 includes the whole geometry. Set
+    min_zoom to 0, creating a single top-level tile that holds
+    everything.
+    """
     bbox = geom.get_bounding_box()
     centroid = 0.5 * (bbox.min_corner + bbox.max_corner)
     box_dims = bbox.max_corner - bbox.min_corner
@@ -57,8 +59,9 @@ def tiler(in_obj, out_dir, target_texels_per_tile, debug_glb, debug_tileset):
 
     geom = Geometry.read(in_obj)
 
-    # Could read the config from a file instead if we want to be consistent from
-    # run to run.
+    # Note that we could read the config from a file instead if we want
+    # to keep the tile system consistent from run to run. But the
+    # auto-config is convenient.
     config = get_auto_config(geom)
     logging.info("%s", json.dumps(config, indent=4, sort_keys=True))
 
@@ -108,7 +111,9 @@ def main():
     parser.add_argument("out_dir", help="output directory for 3D tiles")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    tiler(args.in_obj, args.out_dir, args.image_size, args.debug_glb, args.debug_tileset)
+    tiler(
+        args.in_obj, args.out_dir, args.image_size, args.debug_glb, args.debug_tileset
+    )
 
 
 if __name__ == "__main__":

@@ -14,6 +14,11 @@
 # either express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
+"""
+Tools for working with textured 3D meshes. Read and write in OBJ format.
+Perform basic processing.
+"""
+
 import array
 import os
 import re
@@ -24,6 +29,12 @@ from tile_system import BoundingBox
 
 
 def parse_face_vertex(v):
+    """
+    Parse one of the vertex arguments to the OBJ "f" directive,
+    returning a length-3 integer array. Each vertex argument can include
+    up to three integer indices that reference the v, vt, and vn arrays,
+    respectively. Missing indices are represented by the value -1.
+    """
     idx_strings = v.split("/")
     idx = [(-1 if s == "" else int(s)) for s in idx_strings]
     idx.extend([-1] * (3 - len(idx)))
@@ -31,6 +42,11 @@ def parse_face_vertex(v):
 
 
 def dump_face_vertex(idx):
+    """
+    Serialize one of the vertex arguments for the OBJ "f" directive to a
+    string.  Input is a length-3 integer array, with missing indices
+    represented by the value -1.
+    """
     if idx[1] == -1:
         if idx[2] == -1:
             return str(idx[0])
@@ -46,6 +62,22 @@ INT32_MAX = np.iinfo(np.int32).max
 
 
 def garbage_collect(in_refs, in_objects):
+    """
+    Non-destructively garbage collect unused objects.
+
+    Inputs: @in_objects should be an N x K np.array. @in_refs should be
+    a length-M np.array of indices referencing rows of @in_objects.
+
+    Rows of @in_objects are considered to be unused if no index in
+    @in_refs references them. The return values are updated copies of
+    @in_refs and @in_objects that discard the unused objects.
+
+    Outputs: @out_objects will be an N' x K np.array, where N' is the
+    number of distinct indices in @in_refs. @out_refs will be a length-M
+    np.array of indices referencing rows of @out_objects, satisfying
+    out_objects[out_refs[i], :] == in_objects[in_refs[i], :] for all i.
+    """
+
     keep_refs = np.unique(in_refs)
 
     # fill invalid entries in reference index array with INT32_MAX in order to
@@ -60,13 +92,41 @@ def garbage_collect(in_refs, in_objects):
 
 
 class MtlLib(object):
+    """
+    Represents the OBJ format's MTL companion file that specifies
+    material properties. This implementation only surfaces texture image
+    information so we can upsample/repack/downsample the texture
+    atlases.
+    """
+
     def __init__(self, input_path, materials, lines):
         self.input_path = input_path
+        """
+        The path the MTL file was read from.
+        """
+
         self.materials = materials
+        """
+        A dictionary mapping each material name to a tuple of
+        information about the material's texture image. The tuple has
+        the form (material_image_path, material_image), where
+        material_image is an OpenCV image loaded from
+        material_image_path.
+        """
+
         self.lines = lines
+        """
+        An unmodified array of the lines read from the original MTL
+        file. The lines can be processed as they are written back to a
+        modified MTL file.
+        """
 
     @classmethod
     def read(cls, input_path):
+        """
+        Parse an MTL file, returning an MtlLib instance. The texture
+        images will also be loaded in order to read their resolution.
+        """
         input_path = os.path.realpath(input_path)
 
         lines = []
@@ -97,6 +157,10 @@ class MtlLib(object):
         return MtlLib(input_path, materials, lines)
 
     def write(self, output_path, texture_map):
+        """
+        Write to an MTL file. Any texture images referenced by
+        the MTL must be written separately.
+        """
         with open(output_path, "w", encoding="utf-8") as out:
             for line in self.lines:
                 if line == "#":
@@ -120,18 +184,70 @@ class MtlLib(object):
 
 
 class Geometry(object):
+    """
+    Represents the geometry in an OBJ file. This implementation covers
+    only a small subset of the commands available in the OBJ file
+    format, focusing on supporting triangular meshes with associated
+    texture images, as produced by the ISAAC geometry mapper.
+    """
+
     def __init__(self, input_path, v, vt, vn, f, mtllib, usemtl, f_mtl):
         self.input_path = input_path
+        """
+        The path the OBJ file was read from.
+        """
+
         self.v = v
+        """
+        An N x 3 array containing N vertex positions in xyz space.
+        """
+
         self.vt = vt
+        """
+        An N x 2 array containing N UV texture coordinates of vertices.
+        Each coordinate is in the range 0 .. 1. To get the actual pixel
+        coordinates in the texture image, scale by the image size.
+        """
+
         self.vn = vn
+        """
+        An N x 3 array containing N vertex normals in xyz space.
+        """
+
         self.f = f
+        """
+        An M x 3 x 3 tensor containing the vertex indices of triangles
+        in the mesh. Tensor axis 0 has length M for the M triangles in
+        the mesh.  Axis 1 has length 3 for the 3 vertices of the
+        triangle. Axis 2 specifies which array of vertex coordinates the
+        indices are referencing: 0 for v, 1 for vt, 2 for vn.
+        """
+
         self.mtllib = mtllib
+        """
+        An MtlLib instance representing the companion MTL for this OBJ
+        file.
+        """
+
         self.usemtl = usemtl
+        """
+        An array array of material names specified by "usemtl" commands in the
+        OBJ that must reference materials declared by "newmtl" commands in the
+        MTL.
+        """
+
         self.f_mtl = f_mtl
+        """
+        A length-M array of material indices specifying the materials for the M
+        faces of the mesh. The indices reference entries in the usemtl array.
+        """
 
     @classmethod
     def read(cls, input_path):
+        """
+        Parse an OBJ file, returning a Geometry instance. The companion
+        MTL file and texture images will also be loaded.
+        """
         input_path = os.path.realpath(input_path)
 
         v = array.array("d")
@@ -199,12 +315,11 @@ class Geometry(object):
 
         return Geometry(input_path, v, vt, vn, f, mtllib, usemtl, f_mtl)
 
-    def apply_rotation(self, R):
-        v = np.matmul(self.v, R.T)
-        vn = np.matmul(self.vn, R.T)
-        return Geometry(self.input_path, v, self.vt, vn, self.f, self.mtllib, self.usemtl, self.f_mtl)
-
     def write(self, output_path, texture_map={}):
+        """
+        Write an OBJ file and its associated MTL file. Any texture
+        images referenced by the MTL must be written separately.
+        """
         output_path = os.path.realpath(output_path)
 
         if self.mtllib:
@@ -235,7 +350,46 @@ class Geometry(object):
                 out.write("f %s %s %s\n" % tuple(dump_face_vertex(v) for v in f))
                 last_f_mtl = f_mtl
 
+    def get_rotated(self, R):
+        """
+        Return a copy of the geometry with the specified rotation
+        applied to the xyz coordinates. This only affects the v and vn
+        arrays, and not the vt array, because it contains UV texture
+        coordinates.
+        """
+        v = np.matmul(self.v, R.T)
+        vn = np.matmul(self.vn, R.T)
+        return Geometry(
+            self.input_path,
+            v,
+            self.vt,
+            vn,
+            self.f,
+            self.mtllib,
+            self.usemtl,
+            self.f_mtl,
+        )
+
     def get_cropped(self, bbox):
+        """
+        Return a copy of the geometry approximately cropped to the
+        specified nominal bounding box.
+
+        Specifically, each face of the triangular mesh whose centroid is
+        within the box will be kept in the copy.  This is a simple way
+        to make sure that each face appears in exactly one tile at every
+        zoom level. Note, however, that this approach means some
+        triangles are likely to extend outside the nominal bounding box.
+
+        Since 3D Tiles requires all geometry of a tile to be within the
+        value specified in its boundingVolume property, the
+        boundingVolume for each tile will need to be recalculated based
+        on its actual contents rather than using the nominal bounding
+        box for the tile specified by the tile system. This will cause
+        adjacent tile boundingVolume boxes to overlap, but that is
+        explicitly allowed in the 3D Tiles spec.
+        """
+
         # keep faces whose centroids are within the bounding box
         face_centroids = np.mean(self.v[self.f[:, :, 0], :], axis=1)
         keep_faces = bbox.is_inside(face_centroids)
@@ -251,11 +405,15 @@ class Geometry(object):
         return Geometry(self.input_path, v, vt, vn, f, self.mtllib, self.usemtl, f_mtl)
 
     def get_bounding_box(self):
+        """
+        Return a BoundingBox that contains all faces in the mesh.
+        """
         return BoundingBox(np.amin(self.v, axis=0), np.amax(self.v, axis=0))
 
     def get_bounding_volume(self):
         """
-        Return bounding box in 3D Tiles boundingVolume format.
+        Return a bounding box that contains all faces in the mesh, in 3D
+        Tiles boundingVolume format.
         """
         bbox = self.get_bounding_box()
         centroid = 0.5 * (bbox.min_corner + bbox.max_corner)
@@ -266,9 +424,25 @@ class Geometry(object):
         return {"box": list(centroid) + x_hl + y_hl + z_hl}
 
     def is_empty(self):
+        """
+        Return True if the mesh contains no faces.
+        """
         return self.f.size == 0
 
     def get_median_texel_size(self):
+        """
+        Return the median size of a texture image pixel (texel). If the
+        xyz coordinates in the geometry are interpreted as physical
+        units of meters (as in ISAAC geometry mapper models), the
+        returned value has units of meters per texel.
+
+        Note that our tiling implementation is *not* really robust to
+        meshes that have a non-uniform texel size. We expect this
+        algorithm to be applied to a mesh with approximately uniform
+        texel size, but took a robust estimation approach in order to
+        avoid getting thrown off by round-off error, which could be
+        greatly magnified if some triangles happen to be very small.
+        """
         xyz_tris = self.v[self.f[:, :, 0], :]
         xyz_side_diffs = np.diff(xyz_tris, axis=1, append=xyz_tris[:, 0:1, :])
         xyz_side_lengths0 = np.linalg.norm(xyz_side_diffs, axis=2)
@@ -282,21 +456,21 @@ class Geometry(object):
 
         uv_tris = self.vt[self.f[:, :, 1], :]
         texel_tris = uv_tris * f_image_size[:, np.newaxis, :]
-        texel_side_diffs = np.diff(
-            texel_tris, axis=1, append=texel_tris[:, 0:1, :]
-        )
+        texel_side_diffs = np.diff(texel_tris, axis=1, append=texel_tris[:, 0:1, :])
         texel_side_lengths0 = np.linalg.norm(texel_side_diffs, axis=2)
         texel_side_lengths = texel_side_lengths0.reshape(-1)
 
-        non_zero = (texel_side_lengths != 0)
+        non_zero = texel_side_lengths != 0
         texel_size = xyz_side_lengths[non_zero] / texel_side_lengths[non_zero]
 
         median_texel_size = np.median(texel_size)
 
-        if 0:
+        if 0:  # debug
             print(f"\n=== xyz_tris ===\n\n{xyz_tris[:10, :, :]}")
             print(f"\n=== xyz_side_diffs (cm) ===\n\n{100 * xyz_side_diffs[:10, :, :]}")
-            print(f"\n=== xyz_side_lengths0 (cm) ===\n\n{100 * xyz_side_lengths0[:10, :]}")
+            print(
+                f"\n=== xyz_side_lengths0 (cm) ===\n\n{100 * xyz_side_lengths0[:10, :]}"
+            )
             print(f"\n=== texture_image_sizes ===\n\n{texture_image_sizes}")
             print(f"\n=== uv_tris ===\n\n{uv_tris[:10, :, :]}")
             print(f"\n=== texel_tris ===\n\n{texel_tris[:10, :, :]}")

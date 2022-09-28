@@ -14,7 +14,10 @@
 # either express or implied. See the License for the specific language governing
 # permissions and limitations under the License.
 
-import itertools
+"""
+Library for generating a 3D Tiles reperesentation from an OBJ file.
+"""
+
 import json
 import logging
 import math
@@ -26,24 +29,46 @@ import numpy as np
 from obj_geometry import Geometry
 from tile_system import Tile, TileSystem
 
-
-# UPSAMPLE_FACTOR = 3.0
-
-# A larger value improves quality, but unfortunately, we run into an error in
-# example_repack's image loading library if it tries to unpack an image that
-# will occupy more than ~ 1 GB memory (it uses 32-bit byte offsets).
 UPSAMPLE_FACTOR = 1.0
+"""
+Upsampling factor for image processing.
 
-# This is an arbitrary big value to provide for geometric error we use when we
-# want to ensure that a tile is always rendered.
+As a workaround for the oversimplified pixel resampling algorithm in
+example_repack, we upsample images before repacking and downsampling them to
+the desired resolution. This means the resampling is effectively being
+provided by the more sophisticated algorithms available in OpenCV.
+
+Increasing the value up to about 3.0 provides a noticeable quality improvement,
+but unfortunately, we run into an error in example_repack's image loading
+library if it tries to unpack an image that will occupy more than ~ 1 GB memory
+(it uses 32-bit byte offsets). We can't really set UPSAMPLE_FACTOR larger than
+1.0 as long as some of the models we care about have texture images at size
+8192 x 8192.  If the texture images were limited to 2048 x 2048 we would
+probably be able to go up to 3.0.
+"""
+
 BIG_GEOMETRIC_ERROR = 100
+"""
+An arbitrary big value to provide for the 3D Tiles geometricError property we
+use when we want to ensure that a tile is always rendered.
+"""
 
-# Apply Z-up to Y-up transform as described in:
-# https://github.com/CesiumGS/3d-tiles/blob/main/specification/README.md#tile-transforms
-Y_UP_TO_Z_UP = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], dtype=np.int32)
 Z_UP_TO_Y_UP = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.int32)
+"""
+Z-up to Y-up rotation.
+"""
+
+Y_UP_TO_Z_UP = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], dtype=np.int32)
+"""
+Y-up to Z-up rotation.
+"""
+
 
 def dosys(cmd, exc_on_error=True):
+    """
+    Execute @cmd with logging to console. If @exc_on_error is True, raise an
+    exception if the command returns with a non-zero return value (error).
+    """
     logging.info("%s", cmd)
     ret = os.system(cmd)
     if ret != 0:
@@ -54,12 +79,27 @@ def dosys(cmd, exc_on_error=True):
 
 
 def resize_to(out_dim, in_path, out_path, scale_factor_limit=None):
+    """
+    Read the image at @in_path, resize to @out_dim, and write to @out_path.
+
+    @out_dim is a tuple (width, height). Each of the values is
+    interpreted as a maximum constraint, and the output image will
+    preserve the input image's aspect ratio. For example, if @out_dim is
+    (100, 100), the output image could have size (100, 50), (75, 100),
+    or (100, 100), whatever best matches the input aspect ratio. This is
+    the same behavior as ImageMagick "convert -resize WxH".
+
+    If @scale_factor_limit is specified, it provides a maximum scale
+    factor that can reduce the output image size if it is smaller than
+    the scale factor calculated from @out_dim. This can be used to
+    ensure the output image resolution never exceeds the original source
+    resolution, which would waste space without providing any benefit.
+    """
     logging.info(f"resize_to {out_dim} {in_path} {out_path} {scale_factor_limit}")
     in_img = cv2.imread(in_path, cv2.IMREAD_UNCHANGED)
     in_h, in_w, num_channels = in_img.shape
 
-    # Adjust out_dim to preserve the input aspect ratio. This is the same
-    # behavior as ImageMagick "convert -resize WxH".
+    # Adjust out_dim to preserve the input aspect ratio
     out_w, out_h = out_dim
     scale_factor = min(float(out_w) / in_w, float(out_h) / in_h)
     if scale_factor_limit:
@@ -73,6 +113,10 @@ def resize_to(out_dim, in_path, out_path, scale_factor_limit=None):
 
 
 def resize_scale(scale_factor, in_path, out_path):
+    """
+    Read the image at @in_path, scale by @scale_factor, and write to
+    @out_path.
+    """
     logging.info(f"resize_scale {scale_factor} {in_path} {out_path}")
     in_img = cv2.imread(in_path, cv2.IMREAD_UNCHANGED)
     in_h, in_w, num_channels = in_img.shape
@@ -84,23 +128,75 @@ def resize_scale(scale_factor, in_path, out_path):
 
 
 class TileGenerator(object):
-    def __init__(self, out_path, ts, min_zoom, target_texels_per_tile, debug_glb, debug_tileset):
-        self.out_path = out_path
-        self.ts = ts
-        self.min_zoom = min_zoom
-        self.target_texels_per_tile = target_texels_per_tile
-        self.debug_glb = debug_glb
-        self.debug_tileset = debug_tileset
+    """
+    Class for generating a 3D Tiles reperesentation from an OBJ file.
+    """
 
-        self.texture_map = {}
+    def __init__(
+        self, out_path, ts, min_zoom, target_texels_per_tile, debug_glb, debug_tileset
+    ):
+        self.out_path = out_path
+        """
+        The path to the directory where temporary build files
+        and 3D Tiles output files will be written.
+        """
+
+        self.ts = ts
+        """
+        A TileSystem instance defining the tile naming scheme and how
+        tile indices correspond to nominal tile bounding boxes.
+        """
+
+        self.min_zoom = min_zoom
+        """
+        The minimum zoom level of the TileSystem to use for the top 3D
+        Tiles that contain actual geometry.
+        """
+
+        self.target_texels_per_tile = target_texels_per_tile
+        """
+        A size hint for the desired width and height (in pixels) of the
+        texture image associated with each 3D Tile. Actual output texture
+        images could be larger or smaller than the size hint in certain
+        corner cases.
+        """
+
+        self.debug_glb = debug_glb
+        """
+        If True, output GLB format tiles and debug_glb_viewer.html.
+        """
+
+        self.debug_tileset = debug_tileset
+        """
+        If True, output debug_tileset_viewer.html.
+        """
+
+        self.up_texture_map = {}
+        """
+        A dictionary mapping original texture image paths to upsampled output
+        texture image paths. Used in writing modified MTL files that reference
+        the upsampled image textures.
+        """
+
         self.input_texel_size = None
+        """
+        The median size of a texture image pixel (texel) in the original
+        source texture images. If the xyz coordinates in the geometry
+        are interpreted as physical units of meters (as in ISAAC
+        geometry mapper models), the value has units of meters per
+        texel.
+        """
 
     def generate(self, geom):
+        """
+        Output a 3D Tile set for the specified Geometry. This is the
+        main driver function.
+        """
         if geom.is_empty():
             return None
 
         self.input_texel_size = geom.get_median_texel_size()
-        self.scale_texture_images(geom)
+        self.upsample_texture(geom)
 
         if self.debug_glb:
             self.leaf_tiles_path = os.path.join(
@@ -117,7 +213,7 @@ class TileGenerator(object):
                 "refine": "REPLACE",
             },
         }
-        meta["root"]["children"] = self.generate_tiles(geom)
+        meta["root"]["children"] = self.generate_top_tiles(geom)
 
         tileset_path = self.write_tileset(meta)
         self.install_file(tileset_path)
@@ -128,12 +224,23 @@ class TileGenerator(object):
             self.write_debug_tileset_viewer(geom)
 
     def write_tileset(self, meta):
+        """
+        Write the tileset.json metadata file.
+        """
         tileset_path = self.get_tileset_path()
         with open(tileset_path, "w", encoding="utf-8") as out:
             json.dump(meta, out, ensure_ascii=False, indent=4)
         return tileset_path
 
     def write_debug_glb_viewer(self, geom):
+        """
+        Write debug_glb_viewer.{html,js}.
+
+        Opening the viewer in a browser will use Three.js GLTFLoader to
+        load and visualize the GLB-format version of every leaf tile in
+        the tile set, which should look almost exactly like the original
+        OBJ model at full texture resolution.
+        """
         self.leaf_tiles.close()
 
         this_dir = os.path.dirname(os.path.realpath(__file__))
@@ -164,6 +271,15 @@ class TileGenerator(object):
             out_js.write(js_text)
 
     def write_debug_tileset_viewer(self, geom):
+        """
+        Write debug_tileset_viewer.{html,js}.
+
+        Opening the viewer in a browser will use the NASA AMMOS
+        3D-tiles-renderer library to load and visualize the 3D Tiles
+        tile set. Bounding boxes for individual 3D Tiles are displayed
+        for debugging, so you can see when parent tiles are replaced
+        with higher-zoom children.
+        """
         this_dir = os.path.dirname(os.path.realpath(__file__))
         base_prefix = "debug_tileset_viewer"
 
@@ -188,7 +304,15 @@ class TileGenerator(object):
                 js_text = js_text.replace(pattern, value)
             out_js.write(js_text)
 
-    def generate_tiles(self, geom):
+    def generate_top_tiles(self, geom):
+        """
+        Generate the top tiles in the tile set that contain actual
+        geometry. Depending on the tile system parameters and the
+        @min_zoom value, there might be one such tile, or many.
+
+        All of these top tiles will be children of a single root tile
+        with no geometry (no 3D Tiles content field specified).
+        """
         bbox = geom.get_bounding_box()
         min_idx = self.ts.get_index_vec_for_pt(bbox.min_corner, self.min_zoom)
         max_idx = self.ts.get_index_vec_for_pt(bbox.max_corner, self.min_zoom) + 1
@@ -198,38 +322,50 @@ class TileGenerator(object):
             for yi in range(min_idx[1], max_idx[1]):
                 for zi in range(min_idx[2], max_idx[2]):
                     tile = Tile(self.min_zoom, xi, yi, zi)
-                    child_meta = self.generate_tile(geom, tile, True, BIG_GEOMETRIC_ERROR)
+                    child_meta = self.generate_tile(
+                        geom, tile, True, BIG_GEOMETRIC_ERROR
+                    )
                     if child_meta is not None:
                         meta.append(child_meta)
         return meta
 
     def get_crop_tile_path(self, tile):
+        """
+        Return the path to use for writing a tile after the crop step.
+        """
         return os.path.join(self.out_path, "build", self.ts.get_path(tile)) + "_crop"
 
     def get_repack_tile_path(self, tile):
+        """
+        Return the path to use for writing a tile after the texture repack step.
+        """
         return os.path.join(self.out_path, "build", self.ts.get_path(tile)) + "_repack"
 
     def get_downsample_tile_path(self, tile):
+        """
+        Return the path to use for writing a tile after the downsample texture image step.
+        """
         return (
             os.path.join(self.out_path, "build", self.ts.get_path(tile)) + "_downsample"
         )
 
     def get_output_tile_path(self, tile):
+        """
+        Return the path to use for writing the final output file.
+        """
         return os.path.join(self.out_path, "build", self.ts.get_path(tile))
 
     def get_tileset_path(self):
+        """
+        Return the path to use for writing the tile set metadata.
+        """
         return os.path.join(self.out_path, "build", "tileset.json")
 
-    def write_cropped_tile(self, geom, tile):
-        crop_tile_path = self.get_crop_tile_path(tile)
-        os.makedirs(os.path.dirname(crop_tile_path), exist_ok=True)
-
-        # our geometry is inherently z-up but glTF specifies y-up
-        tf_geom = geom.apply_rotation(Z_UP_TO_Y_UP)
-
-        tf_geom.write(crop_tile_path + ".obj", self.texture_map)
-
-    def scale_texture_images(self, geom):
+    def upsample_texture(self, geom):
+        """
+        Upsample the original texture images, prior to doing per-tile
+        repacking and dowsampling.
+        """
         for input_img_path, input_img in geom.mtllib.materials.values():
             input_base = os.path.basename(input_img_path)
             output_base = f"up_{input_base}"
@@ -240,9 +376,32 @@ class TileGenerator(object):
             os.makedirs(os.path.dirname(output_img_path), exist_ok=True)
             resize_scale(UPSAMPLE_FACTOR, input_img_path, output_img_path)
             rel_output_img_path = os.path.join("..", "..", "..", output_base)
-            self.texture_map[input_img_path] = rel_output_img_path
+            self.up_texture_map[input_img_path] = rel_output_img_path
+
+    def write_cropped_tile(self, geom, tile):
+        """
+        Write the tile after the crop step. This step writes modified
+        OBJ and MTL files that reference the upsampled texture images.
+        """
+        crop_tile_path = self.get_crop_tile_path(tile)
+        os.makedirs(os.path.dirname(crop_tile_path), exist_ok=True)
+
+        # Our geometry is inherently Z-up but glTF specifies Y-up, so we need
+        # to apply a rotation. 3D Tiles uses Z-up coordinates and interprets
+        # any glTF geometry as Y-up, so it will apply the inverse rotation to
+        # any glTF models it loads and we'll end up back with our desired
+        # geometry. (Note that our final B3DM format output is essentially a
+        # wrapped binary glTF.) See
+        # https://github.com/CesiumGS/3d-tiles/blob/main/specification/README.md#tile-transforms
+        tf_geom = geom.get_rotated(Z_UP_TO_Y_UP)
+
+        tf_geom.write(crop_tile_path + ".obj", self.up_texture_map)
 
     def repack_texture(self, tile):
+        """
+        Repack multiple texture images into a single texture image. This
+        step writes modified OBJ, MTL, and texture images.
+        """
         crop_tile_path = self.get_crop_tile_path(tile)
         repack_tile_path = self.get_repack_tile_path(tile)
 
@@ -258,6 +417,12 @@ class TileGenerator(object):
         )
 
     def downsample_texture(self, geom, tile, force_full_res):
+        """
+        Downsample the texture image output by the repack step. Return
+        the effective scale factor for the whole processing chain
+        between the original source image and the final downsampled
+        image.
+        """
         repack_tile_path = self.get_repack_tile_path(tile)
         downsample_tile_path = self.get_downsample_tile_path(tile)
 
@@ -293,16 +458,32 @@ class TileGenerator(object):
         return scale_factor * UPSAMPLE_FACTOR
 
     def convert_to_glb(self, tile):
+        """
+        Debug only. Convert the final OBJ output to GLB format that can
+        be loaded by debug_glb_viewer.html.
+        """
         downsample_tile_path = self.get_downsample_tile_path(tile)
-        downsample_tile_glb = downsample_tile_path + ".glb"
+        downsample_geom = Geometry.read(downsample_tile_path + ".obj")
+
+        # A bit of a hack. The debug viewer assumes Z-up, so undo
+        # the rotation we applied earlier.
+        unrot_geom = downsample_geom.get_rotated(Y_UP_TO_Z_UP)
+        unrot_tile_path = downsample_tile_path + "_unrot"
+        unrot_geom.write(unrot_tile_path + ".obj")
+
+        unrot_tile_glb = unrot_tile_path + ".glb"
         output_tile_glb = self.get_output_tile_path(tile) + ".glb"
-        dosys(f"obj23dtiles.js -b -i {downsample_tile_path}.obj")
+        dosys(f"obj23dtiles.js -b -i {unrot_tile_path}.obj")
         # the -o option to obj23dtiles is apparently not respected, so do our
         # own rename operation
-        os.rename(downsample_tile_glb, output_tile_glb)
+        os.rename(unrot_tile_glb, output_tile_glb)
         return output_tile_glb
 
     def convert_to_b3dm(self, tile):
+        """
+        Convert the final OBJ output to B3DM format compatible with
+        the 3D Tiles spec.
+        """
         downsample_tile_path = self.get_downsample_tile_path(tile)
         downsample_tile_b3dm = downsample_tile_path + ".b3dm"
         output_tile_b3dm = self.get_output_tile_path(tile) + ".b3dm"
@@ -313,9 +494,13 @@ class TileGenerator(object):
         self.install_file(output_tile_b3dm)
 
     def install_file(self, build_path):
+        """
+        Copy a file from its location under the "build" directory to the
+        corresponding location under the output "tiles" directory.
+        """
         suffix = os.path.relpath(
             os.path.realpath(build_path),
-            os.path.realpath(os.path.join(self.out_path, "build"))
+            os.path.realpath(os.path.join(self.out_path, "build")),
         )
         install_path = os.path.realpath(os.path.join(self.out_path, "tiles", suffix))
         install_dir = os.path.dirname(install_path)
@@ -324,6 +509,11 @@ class TileGenerator(object):
         os.chmod(install_path, 0o644)
 
     def generate_tile(self, parent_geom, tile, root, parent_max_error):
+        """
+        Generate one tile in the 3D Tiles tile set. This function is
+        called recursively while walking the octree structure defined by
+        the tile system.
+        """
         geom = parent_geom.get_cropped(self.ts.get_bounding_box(tile))
         if geom.is_empty():
             return
@@ -345,16 +535,30 @@ class TileGenerator(object):
         if self.debug_glb:
             output_tile_glb = self.convert_to_glb(tile)
 
-        rel_tile_b3dm = os.path.relpath(self.get_output_tile_path(tile) + ".b3dm",
-                                        os.path.dirname(self.get_tileset_path()))
+        rel_tile_b3dm = os.path.relpath(
+            self.get_output_tile_path(tile) + ".b3dm",
+            os.path.dirname(self.get_tileset_path()),
+        )
+
+        # The 3D Tiles geometricError field for a tile is defined to be the
+        # maximum geometric error that would be incurred by *not* loading the
+        # tile. In our approach, that is the maximum error in the parent tile
+        # this tile replaces.
         meta = {
             "boundingVolume": geom.get_bounding_volume(),
             "content": {"uri": rel_tile_b3dm},
             "geometricError": parent_max_error,
         }
+
+        # We are currently using identical mesh geometry at all zoom levels in
+        # the tile set (no mesh simplification). However, lower-zoom tiles do
+        # have more scaled-down texture images, so the max error at a zoom
+        # level is based on its texel size.
         max_error = self.input_texel_size / scale_factor
 
-        # this tile is a leaf if it is at the full source resolution
+        # This tile is a leaf if it is at the full source resolution. Note that
+        # the computed scale_factor at full resolution might not be exactly 1.0
+        # due to round-off.
         if scale_factor > 0.999:
             if self.debug_glb:
                 rel_tile_glb = os.path.relpath(
@@ -363,12 +567,9 @@ class TileGenerator(object):
                 self.leaf_tiles.write(rel_tile_glb + "\n")
             return meta
 
-        # if not a leaf, expand children
+        # If not a leaf, expand children.
         meta["children"] = []
-        for xo, yo, zo in itertools.product([0, 1], repeat=3):
-            child = Tile(
-                tile.zoom + 1, 2 * tile.xi + xo, 2 * tile.yi + yo, 2 * tile.zi + zo
-            )
+        for child in self.ts.get_children(tile):
             child_meta = self.generate_tile(geom, child, False, max_error)
             if child_meta is not None:
                 meta["children"].append(child_meta)
