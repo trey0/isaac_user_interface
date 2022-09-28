@@ -280,6 +280,15 @@ class TileGenerator(object):
                 js_text = js_text.replace(pattern, value)
             out_js.write(js_text)
 
+        logging.info("=====================================")
+        logging.info("Generated %s", out_html_path)
+        logging.info("To view the leaf tiles in GLB format:")
+        logging.info("  1. Run a local web server: cd %s && python -m http.server",
+                     os.path.join(self.out_path, "build"))
+        logging.info("  2. Point your browser at: http://localhost:8000/%s.html",
+                     base_prefix)
+        logging.info("=====================================")
+
     def write_debug_tileset_viewer(self, geom):
         """
         Write debug_tileset_viewer.{html,js}.
@@ -313,6 +322,15 @@ class TileGenerator(object):
             for pattern, value in replace_params:
                 js_text = js_text.replace(pattern, value)
             out_js.write(js_text)
+
+        logging.info("=====================================")
+        logging.info("Generated %s", out_html_path)
+        logging.info("To view the 3D Tiles tile set:")
+        logging.info("  1. Run a local web server: cd %s && python -m http.server",
+                     os.path.join(self.out_path, "build"))
+        logging.info("  2. Point your browser at: http://localhost:8000/%s.html",
+                     base_prefix)
+        logging.info("=====================================")
 
     def generate_top_tiles(self, geom):
         """
