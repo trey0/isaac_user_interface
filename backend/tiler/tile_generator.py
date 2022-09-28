@@ -492,7 +492,7 @@ class TileGenerator(object):
 
         unrot_tile_glb = unrot_tile_path + ".glb"
         output_tile_glb = self.get_output_tile_path(tile) + ".glb"
-        dosys(f"obj23dtiles.js -b -i {unrot_tile_path}.obj")
+        dosys(f"obj23dtiles -b -i {unrot_tile_path}.obj")
         # the -o option to obj23dtiles is apparently not respected, so do our
         # own rename operation
         os.rename(unrot_tile_glb, output_tile_glb)
@@ -506,7 +506,7 @@ class TileGenerator(object):
         downsample_tile_path = self.get_downsample_tile_path(tile)
         downsample_tile_b3dm = downsample_tile_path + ".b3dm"
         output_tile_b3dm = self.get_output_tile_path(tile) + ".b3dm"
-        dosys(f"obj23dtiles.js --b3dm -i {downsample_tile_path}.obj")
+        dosys(f"obj23dtiles --b3dm -i {downsample_tile_path}.obj")
         # the -o option to obj23dtiles is apparently not respected, so do our
         # own rename operation
         os.rename(downsample_tile_b3dm, output_tile_b3dm)
