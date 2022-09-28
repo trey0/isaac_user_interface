@@ -21,7 +21,6 @@ Perform basic processing.
 
 import array
 import os
-import re
 
 import cv2
 import numpy as np
@@ -161,6 +160,9 @@ class MtlLib(object):
         Write to an MTL file. Any texture images referenced by
         the MTL must be written separately.
         """
+        if texture_map is None:
+            texture_map = {}
+
         with open(output_path, "w", encoding="utf-8") as out:
             for line in self.lines:
                 if line == "#":
@@ -315,7 +317,7 @@ class Geometry(object):
 
         return Geometry(input_path, v, vt, vn, f, mtllib, usemtl, f_mtl)
 
-    def write(self, output_path, texture_map={}):
+    def write(self, output_path, texture_map=None):
         """
         Write an OBJ file and its associated MTL file. Any texture
         images referenced by the MTL must be written separately.

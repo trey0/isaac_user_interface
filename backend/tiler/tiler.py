@@ -29,7 +29,6 @@ from obj_geometry import Geometry
 from tile_generator import TileGenerator
 from tile_system import TileSystem
 
-
 DEFAULT_TARGET_TEXELS_PER_TILE = 512
 
 
@@ -65,14 +64,14 @@ def tiler(in_obj, out_dir, target_texels_per_tile, debug_glb, debug_tileset):
     config = get_auto_config(geom)
     logging.info("%s", json.dumps(config, indent=4, sort_keys=True))
 
-    ts = TileSystem(
+    tile_system = TileSystem(
         np.array(config["origin"], dtype=np.float64),
         config["scale"],
         "{zoom}/{xi}/{yi}/{zi}",
     )
     generator = TileGenerator(
         "out",
-        ts,
+        tile_system,
         config["min_zoom"],
         target_texels_per_tile,
         debug_glb,

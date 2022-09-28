@@ -20,14 +20,13 @@ Library for generating a 3D Tiles reperesentation from an OBJ file.
 
 import json
 import logging
-import math
 import os
 import shutil
 
 import cv2
 import numpy as np
 from obj_geometry import Geometry
-from tile_system import Tile, TileSystem
+from tile_system import Tile
 
 UPSAMPLE_FACTOR = 1.0
 """
@@ -133,7 +132,13 @@ class TileGenerator(object):
     """
 
     def __init__(
-        self, out_path, ts, min_zoom, target_texels_per_tile, debug_glb, debug_tileset
+        self,
+        out_path,
+        tile_system,
+        min_zoom,
+        target_texels_per_tile,
+        debug_glb,
+        debug_tileset,
     ):
         self.out_path = out_path
         """
@@ -141,7 +146,7 @@ class TileGenerator(object):
         and 3D Tiles output files will be written.
         """
 
-        self.ts = ts
+        self.tile_system = tile_system
         """
         A TileSystem instance defining the tile naming scheme and how
         tile indices correspond to nominal tile bounding boxes.
@@ -187,21 +192,25 @@ class TileGenerator(object):
         texel.
         """
 
+        if self.debug_glb:
+            self.leaf_tiles_path = os.path.join(
+                self.out_path, "build", "leaf_tiles.txt"
+            )
+            self.leaf_tiles = None
+
     def generate(self, geom):
         """
         Output a 3D Tile set for the specified Geometry. This is the
         main driver function.
         """
         if geom.is_empty():
-            return None
+            return
 
         self.input_texel_size = geom.get_median_texel_size()
         self.upsample_texture(geom)
 
         if self.debug_glb:
-            self.leaf_tiles_path = os.path.join(
-                self.out_path, "build", "leaf_tiles.txt"
-            )
+            os.makedirs(os.path.dirname(self.leaf_tiles_path), exist_ok=True)
             self.leaf_tiles = open(self.leaf_tiles_path, "w", encoding="utf-8")
 
         meta = {
@@ -242,6 +251,7 @@ class TileGenerator(object):
         OBJ model at full texture resolution.
         """
         self.leaf_tiles.close()
+        self.leaf_tiles = None
 
         this_dir = os.path.dirname(os.path.realpath(__file__))
         base_prefix = "debug_glb_viewer"
@@ -314,8 +324,10 @@ class TileGenerator(object):
         with no geometry (no 3D Tiles content field specified).
         """
         bbox = geom.get_bounding_box()
-        min_idx = self.ts.get_index_vec_for_pt(bbox.min_corner, self.min_zoom)
-        max_idx = self.ts.get_index_vec_for_pt(bbox.max_corner, self.min_zoom) + 1
+        min_idx = self.tile_system.get_index_vec_for_pt(bbox.min_corner, self.min_zoom)
+        max_idx = (
+            self.tile_system.get_index_vec_for_pt(bbox.max_corner, self.min_zoom) + 1
+        )
 
         meta = []
         for xi in range(min_idx[0], max_idx[0]):
@@ -333,27 +345,34 @@ class TileGenerator(object):
         """
         Return the path to use for writing a tile after the crop step.
         """
-        return os.path.join(self.out_path, "build", self.ts.get_path(tile)) + "_crop"
+        return (
+            os.path.join(self.out_path, "build", self.tile_system.get_path(tile))
+            + "_crop"
+        )
 
     def get_repack_tile_path(self, tile):
         """
         Return the path to use for writing a tile after the texture repack step.
         """
-        return os.path.join(self.out_path, "build", self.ts.get_path(tile)) + "_repack"
+        return (
+            os.path.join(self.out_path, "build", self.tile_system.get_path(tile))
+            + "_repack"
+        )
 
     def get_downsample_tile_path(self, tile):
         """
         Return the path to use for writing a tile after the downsample texture image step.
         """
         return (
-            os.path.join(self.out_path, "build", self.ts.get_path(tile)) + "_downsample"
+            os.path.join(self.out_path, "build", self.tile_system.get_path(tile))
+            + "_downsample"
         )
 
     def get_output_tile_path(self, tile):
         """
         Return the path to use for writing the final output file.
         """
-        return os.path.join(self.out_path, "build", self.ts.get_path(tile))
+        return os.path.join(self.out_path, "build", self.tile_system.get_path(tile))
 
     def get_tileset_path(self):
         """
@@ -416,7 +435,7 @@ class TileGenerator(object):
             f"cd {common_dir} && example_repack {crop_tile_base}.obj {repack_tile_base}"
         )
 
-    def downsample_texture(self, geom, tile, force_full_res):
+    def downsample_texture(self, tile, force_full_res):
         """
         Downsample the texture image output by the repack step. Return
         the effective scale factor for the whole processing chain
@@ -514,9 +533,9 @@ class TileGenerator(object):
         called recursively while walking the octree structure defined by
         the tile system.
         """
-        geom = parent_geom.get_cropped(self.ts.get_bounding_box(tile))
+        geom = parent_geom.get_cropped(self.tile_system.get_bounding_box(tile))
         if geom.is_empty():
-            return
+            return None
 
         self.write_cropped_tile(geom, tile)
         self.repack_texture(tile)
@@ -529,7 +548,7 @@ class TileGenerator(object):
         # image is larger than the target tile image size.
         force_full_res = not root and (len(parent_geom.f) == len(geom.f))
 
-        scale_factor = self.downsample_texture(geom, tile, force_full_res)
+        scale_factor = self.downsample_texture(tile, force_full_res)
 
         self.convert_to_b3dm(tile)
         if self.debug_glb:
@@ -569,7 +588,7 @@ class TileGenerator(object):
 
         # If not a leaf, expand children.
         meta["children"] = []
-        for child in self.ts.get_children(tile):
+        for child in self.tile_system.get_children(tile):
             child_meta = self.generate_tile(geom, child, False, max_error)
             if child_meta is not None:
                 meta["children"].append(child_meta)
