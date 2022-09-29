@@ -10,38 +10,49 @@
 
 ## Installation
 
-If working in an Ubuntu 20.04 environment, you can install with:
-```bash
-setup/install_local.sh
-```
-
-Or install in a Docker container with:
+Install in a Docker container with:
 ```bash
 setup/build.sh
+```
+
+Or if working in an Ubuntu 20.04 environment, you can install with:
+```bash
+setup/install_local.sh
 ```
 
 ---
 
 ## Example usage
 
-First, install some sample data with:
+This example demonstrates converting a sample OBJ file to a 3D Tiles
+tile set and visualizing the result.
+
+First, install the sample OBJ file with:
 ```bash
 setup/install_sample_data.sh
 ```
 
-Then, in your local environment, you can run with:
-```bash
-./tiler.py --debug-glb --debug-tileset setup/data/fuze.obj setup/data/out
-```
-
-Or in the Docker container, you can run with:
+Then run in the Docker container with:
 ```bash
 setup/run.sh /tiler/tiler.py --debug-glb --debug-tileset /data/fuze.obj /data/out
 ```
 
+Then, you can run in your local environment with:
+```bash
+./tiler.py --debug-glb --debug-tileset setup/data/fuze.obj setup/data/out
+```
+
 In either case, output should be written to the `data/out` directory,
-and you should be able to follow the directions at the end of the build
-to use one of the debug viewers to view the tile set in your browser.
+and you should be able to follow the directions in the console output at
+the end of the run to use either of the debug viewers to view the
+resulting tile set in your browser.
+
+Within the `data/out` directory, the `build` directory contains all
+files created during the conversion process, as well as the debug
+viewers, and the `tiles` directory contains only the final 3D Tiles
+output. You can safely remove the `build` directory when done debugging
+and move the `tiles` directory to wherever you want to host your tile
+set.
 
 Run `tiler.py --help` for more information about options.
 

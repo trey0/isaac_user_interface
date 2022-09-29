@@ -20,5 +20,4 @@
 setup_dir=$(dirname "$(readlink -f "$0")")
 cd "$setup_dir"
 
-# All other installation runs in the container.
 docker build .. -f Dockerfile -t tiler
