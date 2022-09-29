@@ -42,13 +42,28 @@ Or run in your local environment with:
 ./tiler.py --debug-glb --debug-tileset setup/data/fuze.obj setup/data/out
 ```
 
-In either case, output should be written to the `data/out` directory.
-To view the resulting tile set in your browser, follow the directions in
-the console output at the end of the run.
+Whichever way you run, output should be written to the `data/out`
+directory.  To view the resulting tile set in your browser, follow the
+directions in the console output at the end of the run. There are two
+viewers available:
 
-Within the `data/out` directory, the `build` directory contains all
+- `debug_glb_viewer.html` loads just the highest-resolution leaf tiles
+   in GLB format without depending on the 3d-tiles-renderer library
+   or the 3D Tiles metadata.
+
+- `debug_tileset_viewer.html` uses 3d-tiles-renderer to load the 3D
+   Tiles tile set. In addition to the actual mesh, the bounds of the
+   currently rendered tiles are displayed for debugging purposes, so you
+   can see when tiles are loaded or unloaded as the camera perspective
+   changes. Note that some bounding box overlap between adjacent tiles
+   is normal.
+
+The display in either viewer should look almost exactly the same as
+viewing the original OBJ.
+
+Within the `data/out` directory, the `build` directory will contain all
 files created during the conversion process, as well as the debug
-viewers, and the `tiles` directory contains only the final 3D Tiles
+viewers, and the `tiles` directory will contain only the final 3D Tiles
 output. You can safely remove the `build` directory when done debugging
 and move the `tiles` directory to wherever you want to host your tile
 set.
