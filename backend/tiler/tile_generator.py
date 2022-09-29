@@ -95,6 +95,7 @@ def resize_to(out_dim, in_path, out_path, scale_factor_limit=None):
     resolution, which would waste space without providing any benefit.
     """
     logging.info(f"resize_to {out_dim} {in_path} {out_path} {scale_factor_limit}")
+    assert os.path.exists(in_path)
     in_img = cv2.imread(in_path, cv2.IMREAD_UNCHANGED)
     in_h, in_w, num_channels = in_img.shape
 
@@ -117,6 +118,7 @@ def resize_scale(scale_factor, in_path, out_path):
     @out_path.
     """
     logging.info(f"resize_scale {scale_factor} {in_path} {out_path}")
+    assert os.path.exists(in_path)
     in_img = cv2.imread(in_path, cv2.IMREAD_UNCHANGED)
     in_h, in_w, num_channels = in_img.shape
 
@@ -282,11 +284,14 @@ class TileGenerator(object):
 
         logging.info("=====================================")
         logging.info("Generated %s", out_html_path)
-        logging.info("To view the leaf tiles in GLB format:")
-        logging.info("  1. Run a local web server: cd %s && python -m http.server",
-                     os.path.join(self.out_path, "build"))
-        logging.info("  2. Point your browser at: http://localhost:8000/%s.html",
-                     base_prefix)
+        logging.info("To view the GLB format leaf tiles:")
+        logging.info("  1. Run a local web server:")
+        logging.info("       cd %s", os.path.join(self.out_path, "build"))
+        logging.info("       python3 -m http.server")
+        logging.info("       (OR python2 -m SimpleHTTPServer)")
+        logging.info(
+            "  2. Point your browser at: http://localhost:8000/%s.html", base_prefix
+        )
         logging.info("=====================================")
 
     def write_debug_tileset_viewer(self, geom):
@@ -326,10 +331,16 @@ class TileGenerator(object):
         logging.info("=====================================")
         logging.info("Generated %s", out_html_path)
         logging.info("To view the 3D Tiles tile set:")
-        logging.info("  1. Run a local web server: cd %s && python -m http.server",
-                     os.path.join(self.out_path, "build"))
-        logging.info("  2. Point your browser at: http://localhost:8000/%s.html",
-                     base_prefix)
+        logging.info("  1. Run a local web server:")
+        logging.info("       cd %s", os.path.join(self.out_path, "build"))
+        logging.info("       python3 -m http.server")
+        logging.info("       (OR python2 -m SimpleHTTPServer)")
+        logging.info(
+            "  2. Point your browser at: http://localhost:8000/%s.html", base_prefix
+        )
+        logging.info(
+            "Note that you may find you need to zoom the viewer in and out a bit to get the tiles to initially load (use mouse wheel or two-finger scroll motion)."
+        )
         logging.info("=====================================")
 
     def generate_top_tiles(self, geom):
@@ -404,6 +415,10 @@ class TileGenerator(object):
         repacking and dowsampling.
         """
         for input_img_path, input_img in geom.mtllib.materials.values():
+            full_input_img_path = os.path.join(
+                os.path.dirname(os.path.realpath(geom.mtllib.input_path)),
+                input_img_path,
+            )
             input_base = os.path.basename(input_img_path)
             output_base = f"up_{input_base}"
             output_base = os.path.splitext(output_base)[0] + ".png"
@@ -411,7 +426,7 @@ class TileGenerator(object):
                 os.path.join(self.out_path, "build", output_base)
             )
             os.makedirs(os.path.dirname(output_img_path), exist_ok=True)
-            resize_scale(UPSAMPLE_FACTOR, input_img_path, output_img_path)
+            resize_scale(UPSAMPLE_FACTOR, full_input_img_path, output_img_path)
             rel_output_img_path = os.path.join("..", "..", "..", output_base)
             self.up_texture_map[input_img_path] = rel_output_img_path
 
@@ -494,6 +509,26 @@ class TileGenerator(object):
 
         return scale_factor * UPSAMPLE_FACTOR
 
+    def obj23dtiles(self, output_ext, input_path, output_path):
+        """
+        Call obj23dtiles to convert the OBJ to the specified type.
+        Return the path to the output file.
+        """
+        arg_map = {
+            ".glb": "-b",
+            ".b3dm": "--b3dm",
+        }
+        arg = arg_map[output_ext]
+
+        # This should theoretically work, but the script doesn't properly
+        #   respect the -o argument:
+        # dosys(f"obj23dtiles {arg} -i {input_path}.obj -o {output_path}{output_ext}")
+
+        # So we do this instead:
+        dosys(f"obj23dtiles {arg} -i {input_path}.obj")
+        os.rename(input_path + output_ext, output_path + output_ext)
+        return output_path + output_ext
+
     def convert_to_glb(self, tile):
         """
         Debug only. Convert the final OBJ output to GLB format that can
@@ -508,13 +543,9 @@ class TileGenerator(object):
         unrot_tile_path = downsample_tile_path + "_unrot"
         unrot_geom.write(unrot_tile_path + ".obj")
 
-        unrot_tile_glb = unrot_tile_path + ".glb"
-        output_tile_glb = self.get_output_tile_path(tile) + ".glb"
-        dosys(f"obj23dtiles -b -i {unrot_tile_path}.obj")
-        # the -o option to obj23dtiles is apparently not respected, so do our
-        # own rename operation
-        os.rename(unrot_tile_glb, output_tile_glb)
-        return output_tile_glb
+        return self.obj23dtiles(
+            ".glb", unrot_tile_path, self.get_output_tile_path(tile)
+        )
 
     def convert_to_b3dm(self, tile):
         """
@@ -522,12 +553,11 @@ class TileGenerator(object):
         the 3D Tiles spec.
         """
         downsample_tile_path = self.get_downsample_tile_path(tile)
-        downsample_tile_b3dm = downsample_tile_path + ".b3dm"
-        output_tile_b3dm = self.get_output_tile_path(tile) + ".b3dm"
-        dosys(f"obj23dtiles --b3dm -i {downsample_tile_path}.obj")
-        # the -o option to obj23dtiles is apparently not respected, so do our
-        # own rename operation
-        os.rename(downsample_tile_b3dm, output_tile_b3dm)
+        output_tile_b3dm = self.obj23dtiles(
+            ".b3dm",
+            downsample_tile_path,
+            self.get_output_tile_path(tile),
+        )
         self.install_file(output_tile_b3dm)
 
     def install_file(self, build_path):

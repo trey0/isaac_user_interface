@@ -70,7 +70,7 @@ def tiler(in_obj, out_dir, target_texels_per_tile, debug_glb, debug_tileset):
         "{zoom}/{xi}/{yi}/{zi}",
     )
     generator = TileGenerator(
-        "out",
+        out_dir,
         tile_system,
         config["min_zoom"],
         target_texels_per_tile,
