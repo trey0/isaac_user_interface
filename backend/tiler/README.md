@@ -15,7 +15,7 @@ Install in a Docker container with:
 setup/build.sh
 ```
 
-Or if working in an Ubuntu 20.04 environment, you can install with:
+Or if working in Ubuntu 20.04, you can install in your local environment with:
 ```bash
 setup/install_local.sh
 ```
@@ -37,15 +37,14 @@ Then run in the Docker container with:
 setup/run.sh /tiler/tiler.py --debug-glb --debug-tileset /data/fuze.obj /data/out
 ```
 
-Then, you can run in your local environment with:
+Or run in your local environment with:
 ```bash
 ./tiler.py --debug-glb --debug-tileset setup/data/fuze.obj setup/data/out
 ```
 
-In either case, output should be written to the `data/out` directory,
-and you should be able to follow the directions in the console output at
-the end of the run to use either of the debug viewers to view the
-resulting tile set in your browser.
+In either case, output should be written to the `data/out` directory.
+To view the resulting tile set in your browser, follow the directions in
+the console output at the end of the run.
 
 Within the `data/out` directory, the `build` directory contains all
 files created during the conversion process, as well as the debug
