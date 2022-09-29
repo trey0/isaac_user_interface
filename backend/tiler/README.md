@@ -15,7 +15,8 @@ Install in a Docker container with:
 setup/build.sh
 ```
 
-Or if working in Ubuntu 20.04, you can install in your local environment with:
+Or if working in Ubuntu 20.04, you can install the dependencies in your
+local environment with:
 ```bash
 setup/install_local.sh
 ```
@@ -27,12 +28,14 @@ setup/install_local.sh
 This example demonstrates converting a sample OBJ file to a 3D Tiles
 tile set and visualizing the result.
 
-First, install the sample OBJ file with:
+First, follow the installation instructions above.
+
+Then install the sample OBJ file with:
 ```bash
 setup/install_sample_data.sh
 ```
 
-Then run in the Docker container with:
+And run in the Docker container with:
 ```bash
 setup/run.sh /tiler/tiler.py --debug-glb --debug-tileset /data/fuze.obj /data/out
 ```
@@ -45,7 +48,7 @@ Or run in your local environment with:
 Whichever way you run, output should be written to the `data/out`
 directory.  To view the resulting tile set in your browser, follow the
 directions in the console output at the end of the run. There are two
-viewers available:
+debug viewers available:
 
 - `debug_glb_viewer.html` loads just the highest-resolution leaf tiles
    in GLB format without depending on the 3d-tiles-renderer library
